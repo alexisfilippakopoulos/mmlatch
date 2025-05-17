@@ -14,17 +14,6 @@ from torch.optim.optimizer import Optimizer
 
 from typing import Dict, Union, List, TypeVar, Tuple
 
-import numpy as np
-import matplotlib.pyplot as plt
-import umap
-import seaborn as sns
-import re
-
-
-from sklearn.metrics import silhouette_score, davies_bouldin_score
-from sklearn.metrics.pairwise import cosine_similarity
-
-
 T = TypeVar("T")
 K = TypeVar("K")
 V = TypeVar("V")
@@ -201,7 +190,7 @@ def safe_mkdirs(path: str) -> None:
 
 def yaml_load(fname: str) -> GenericDict:
     with open(fname, "r") as fd:
-        data = yaml.load(fd, Loader=yaml.Loader) # Changed from data = yaml.load(fd)
+        data = yaml.load(fd)
     return data
 
 
@@ -235,130 +224,3 @@ def print_separator(
     symbol: str = "*", n: int = 10, print_fn: Callable[[str], None] = print
 ):
     print_fn(symbol * n)
-
-
-
-# ==== Function to bin predictions ====
-def bin_predictions(predictions):
-    if isinstance(predictions, torch.Tensor):  # Convert tensor to NumPy
-        predictions = predictions.detach().cpu().numpy()
-
-    bins = [-np.inf, -2.5, -1.5, -0.5, 0.5, 1.5, 2.5, np.inf]
-    labels = np.array([-3, -2, -1, 0, 1, 2, 3])
-
-    bin_indices = np.digitize(predictions, bins, right=True) - 1  # Adjust indices
-    return labels[bin_indices]  # Map to correct labels
-
-
-# ==== Function to plot UMAP embeddings ====
-def plot_umap(embeddings, predictions, title_before, title_after, ax1, ax2, save_path):
-    # Convert predictions to NumPy if it's a tensor
-    if torch.is_tensor(predictions):
-        predictions = predictions.cpu().numpy()
-    
-    reducer = umap.UMAP(n_neighbors=15, min_dist=0.1, metric="cosine", random_state=42)
-    
-    # Fit and transform embeddings
-    embedding_before = reducer.fit_transform(embeddings["before"])
-    embedding_after = reducer.fit_transform(embeddings["after"])
-    
-    # Scatter plots
-    scatter1 = ax1.scatter(embedding_before[:, 0], embedding_before[:, 1], c=predictions, cmap="viridis", alpha=0.7)
-    scatter2 = ax2.scatter(embedding_after[:, 0], embedding_after[:, 1], c=predictions, cmap="viridis", alpha=0.7)
-    
-    # Titles and aesthetics
-    ax1.set_title(title_before)
-    ax2.set_title(title_after)
-    ax1.set_xticks([]), ax1.set_yticks([])
-    ax2.set_xticks([]), ax2.set_yticks([])
-    
-    # Add colorbars
-    plt.colorbar(scatter1, ax=ax1, label="Binned Prediction Labels")
-    plt.colorbar(scatter2, ax=ax2, label="Binned Prediction Labels")
-    
-    if save_path:
-        plt.savefig(save_path, bbox_inches="tight", dpi=300)
-        print(f"Figure saved to {save_path}")
-def compute_metrics_embeddings(embeddings, labels):
-
-        if torch.is_tensor(embeddings):
-            embeddings = embeddings.cpu().numpy()
-        if torch.is_tensor(labels):
-            labels = labels.cpu().numpy()
-        # Check for NaN or Inf
-        if np.isnan(embeddings).any() or np.isinf(embeddings).any():
-            print("Warning: Embeddings contain NaN or Inf. Skipping metric computation.")
-            embeddings = fix_nan_inf(embeddings)
-
-        # Reduce embeddings to match label count if necessary
-        if embeddings.shape[0] != labels.shape[0]:
-            embeddings = embeddings.reshape(1, -1)
-        
-        if embeddings.shape[0] < 2 or len(set(labels)) < 2:
-            return None, None
-        
-        silhouette = silhouette_score(embeddings, labels)
-        # Normalize embeddings before cosine similarity
-        norm_embeddings = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
-
-        # Compute cosine similarity within clusters
-        cos_sim_within = []
-        unique_labels = np.unique(labels)
-
-        for label in unique_labels:
-            cluster_indices = np.where(labels == label)[0]
-            if len(cluster_indices) > 1:
-                cluster_embeddings = norm_embeddings[cluster_indices]
-                cos_sim_matrix = cosine_similarity(cluster_embeddings)
-                cos_sim_within.append(np.mean(cos_sim_matrix[np.triu_indices_from(cos_sim_matrix, k=1)]))
-
-        mean_cosine_similarity = np.mean(cos_sim_within) if cos_sim_within else None
-
-        # Compute Davies-Bouldin Index (Lower is better)
-        dbi = davies_bouldin_score(embeddings, labels)
-
-        
-        
-        return silhouette, mean_cosine_similarity, dbi
-
-def truncate_embeddings(embeddings_list):
-        min_dim = min(emb.shape[1] for emb in embeddings_list)  # Find minimum feature dimension
-        return [emb[:, :min_dim] for emb in embeddings_list]  # Truncate all to the same size
-    
-
-def fix_nan_inf(embeddings):
-        """
-        Intelligently replace NaNs and Infs in embeddings:
-        - NaNs are replaced with the mean of the non-NaN values in the corresponding dimension
-        - Infs are replaced with the max/min finite value based on the sign
-        """
-        # Create a copy to avoid modifying the original array
-        fixed_embeddings = embeddings.copy()
-        
-        # Handle NaNs
-        for dim in range(fixed_embeddings.shape[1]):
-            column = fixed_embeddings[:, dim]
-            nan_mask = np.isnan(column)
-            
-            if nan_mask.any():
-                # Replace NaNs with the mean of non-NaN values in that dimension
-                non_nan_mean = np.nanmean(column)
-                fixed_embeddings[nan_mask, dim] = non_nan_mean
-        
-        # Handle Infs
-        for dim in range(fixed_embeddings.shape[1]):
-            column = fixed_embeddings[:, dim]
-            pos_inf_mask = np.isinf(column) & (column > 0)
-            neg_inf_mask = np.isinf(column) & (column < 0)
-            
-            if pos_inf_mask.any():
-                # Replace positive infinities with the max finite value
-                max_finite = np.max(column[~np.isinf(column)])
-                fixed_embeddings[pos_inf_mask, dim] = max_finite
-            
-            if neg_inf_mask.any():
-                # Replace negative infinities with the min finite value
-                min_finite = np.min(column[~np.isinf(column)])
-                fixed_embeddings[neg_inf_mask, dim] = min_finite
-        
-        return fixed_embeddings

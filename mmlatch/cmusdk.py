@@ -6,11 +6,7 @@ from tqdm import tqdm
 
 import mmsdk
 from mmsdk import mmdatasdk as md
-import random
 
-# Set a random seed for reproducibility
-RANDOM_SEED = 42
-random.seed(RANDOM_SEED)
 
 from mmlatch.const import (
     SPECIAL_TOKENS,
@@ -144,7 +140,7 @@ def load_dataset(
     }
     data.add_computational_sequences(label_recipe, destination=None)
     data.align(modality_map["labels"])
-    data.unify() #changed hard_unify to unify
+    data.hard_unify()
     align_path = base_path + "_final_aligned"
     safe_mkdirs(align_path)
     deploy(data, align_path)
@@ -175,7 +171,7 @@ def load_aligned(base_path, dataset="mosi", modalities={"audio", "text"}):
 
     return data, word2idx
 
-"""
+
 def clean_split_dataset(
     data,
     dataset="mosi",
@@ -320,7 +316,6 @@ def load_splits(
     pad_back=False,
     aligned=False,
     cache=None,
-    fraction=1.0,
 ):
     if cache is not None:
         try:
@@ -424,249 +419,8 @@ def mosei2(
         pad_back=pad_back,
         cache=cache,
         aligned=aligned,
-    )"""
-def clean_split_dataset(
-    data,
-    dataset="mosi",
-    modalities={"audio", "text"},
-    remove_pauses=False,
-    remove_neutral=False,
-    max_length=-1,
-    pad_front=False,
-    pad_back=False,
-    fraction=1.0,  # Added fraction parameter
-):
-    dataset, modality_map = select_dataset(dataset)
-    pattern = re.compile("(.*)\[.*\]")
-    train_split = dataset.standard_folds.standard_train_fold
-    dev_split = dataset.standard_folds.standard_valid_fold
-    test_split = dataset.standard_folds.standard_test_fold
-
-    train, dev, test = [], [], []
-    num_drop = 0  # Initialize drop counter
-
-    # Subsample video IDs for each split based on the fraction
-    if fraction < 1.0:
-        sampled_train_split = random.sample(train_split, int(len(train_split) * fraction))
-        sampled_dev_split = random.sample(dev_split, int(len(dev_split) * fraction))
-        sampled_test_split = random.sample(test_split, int(len(test_split) * fraction))
-    else:
-        sampled_train_split = train_split
-        sampled_dev_split = dev_split
-        sampled_test_split = test_split
-
-    for segment in tqdm(data[modality_map["labels"]].keys()):
-        # Extract video ID and label
-        vid = re.search(pattern, segment).group(1)
-        label = data[modality_map["labels"]][segment]["features"]
-        label = np.nan_to_num(label)
-
-        # Remove neutral labels if specified
-        if remove_neutral and np.sign(label) == 0:
-            continue
-
-        # Extract modalities
-        mods = {k: data[modality_map[k]][segment]["features"] for k in modalities}
-        mod_shapes = {k: v.shape[0] for k, v in mods.items()}
-
-        # Check for shape consistency
-        if len(set(mod_shapes.values())) > 1:
-            print(f"Datapoint {vid} shape mismatch {mod_shapes}")
-            num_drop += 1
-            continue
-
-        # Handle NaNs for non-text modalities
-        for m in modalities:
-            if m != "text":
-                mods[m] = np.nan_to_num(mods[m])
-
-        # Handle pauses in text modality
-        if "text" in modalities:
-            mods_nosp = {k: [] for k in modalities}
-            sp_idx = [i for i, w in enumerate(mods["text"]) if w[0].decode("utf-8") == "sp"]
-
-            if remove_pauses:
-                for m in modalities:
-                    for i in range(len(mods[m])):
-                        if i not in sp_idx:
-                            if m == "text":
-                                word = mods[m][i][0].decode("utf-8")
-                                mods_nosp[m].append(word)
-                            else:
-                                mods_nosp[m].append(mods[m][i, :])
-            else:
-                mods_nosp = mods
-                mods_nosp["text"] = mods_nosp["text"].tolist()
-                for i in range(len(mods["text"])):
-                    if i in sp_idx:
-                        mods_nosp["text"][i] = SPECIAL_TOKENS.PAUSE.value
-                    else:
-                        word = mods["text"][i][0].decode("utf-8")
-                        mods_nosp["text"].append(word)
-
-            mods = mods_nosp
-
-        # Handle maximum sequence length and padding
-        if max_length > 0:
-            for m in modalities:
-                t = []
-                seglen = len(mods[m])
-
-                if seglen > max_length:
-                    t = mods[m][-max_length:]
-                elif seglen < max_length:
-                    padding = [SPECIAL_TOKENS.PAD.value] if m == "text" else [np.zeros(mods[m][0].shape) for _ in range(max_length - seglen)]
-                    t = mods[m]
-                    t = padding + t if pad_front else t + padding
-                else:
-                    t = mods[m]
-
-                mods[m] = t
-
-        # Convert non-text modalities to NumPy arrays
-        for m in modalities:
-            if m != "text":
-                mods[m] = np.asarray(mods[m])
-
-        # Add identifiers and label
-        mods["video_id"] = vid
-        mods["segment_id"] = segment
-        mods["label"] = label
-
-        # Assign to the appropriate split based on video ID
-        if vid in sampled_train_split:
-            train.append(mods)
-        elif vid in sampled_dev_split:
-            dev.append(mods)
-        elif vid in sampled_test_split:
-            test.append(mods)
-        else:
-            print(f"{vid} does not belong to any of the splits")
-
-    print(f"Dropped {num_drop} data points")
-
-    return train, dev, test
-
-def load_splits(
-    base_path,
-    dataset="mosi",
-    modalities={"audio", "text"},
-    remove_pauses=False,
-    remove_neutral=True,
-    max_length=-1,
-    pad_front=False,
-    pad_back=False,
-    aligned=False,
-    cache=None,
-    fraction=1.0,  # Added fraction parameter
-):
-    if cache is not None:
-        try:
-            return pickle_load(cache)
-        except FileNotFoundError:
-            pass
-
-    if not aligned:
-        data, word2idx = load_dataset(base_path, dataset=dataset, modalities=modalities)
-    else:
-        data, word2idx = load_aligned(base_path, dataset=dataset, modalities=modalities)
-
-    train, dev, test = clean_split_dataset(
-        data,
-        dataset=dataset,
-        modalities=modalities,
-        remove_pauses=remove_pauses,
-        remove_neutral=remove_neutral,
-        max_length=max_length,
-        pad_front=pad_front,
-        pad_back=pad_back,
-        fraction=fraction,  # Pass fraction here
     )
 
-    if cache is not None:
-        pickle_dump((train, dev, test, word2idx), cache)
-
-    return train, dev, test, word2idx
-
-def mosi(
-    base_path,
-    modalities={"audio", "text"},
-    remove_pauses=False,
-    remove_neutral=False,
-    max_length=-1,
-    pad_front=False,
-    pad_back=False,
-    cache=None,
-    aligned=False,
-    fraction=1.0,  # Added fraction parameter
-):
-    return load_splits(
-        base_path,
-        dataset="mosi",
-        modalities=modalities,
-        remove_pauses=remove_pauses,
-        remove_neutral=remove_neutral,
-        max_length=max_length,
-        pad_front=pad_front,
-        pad_back=pad_back,
-        cache=cache,
-        aligned=aligned,
-        fraction=fraction,  # Pass fraction here
-    )
-
-def mosei(
-    base_path,
-    modalities={"audio", "text"},
-    remove_pauses=False,
-    max_length=-1,
-    pad_front=False,
-    pad_back=False,
-    cache=None,
-    aligned=False,
-    fraction=1.0,  # Added fraction parameter
-):
-    remove_neutral = False
-
-    return load_splits(
-        base_path,
-        dataset="mosei",
-        modalities=modalities,
-        remove_pauses=remove_pauses,
-        remove_neutral=remove_neutral,
-        max_length=max_length,
-        pad_front=pad_front,
-        pad_back=pad_back,
-        cache=cache,
-        aligned=aligned,
-        fraction=fraction,  # Pass fraction here
-    )
-
-def mosei2(
-    base_path,
-    modalities={"audio", "text"},
-    remove_pauses=False,
-    max_length=-1,
-    pad_front=False,
-    pad_back=False,
-    cache=None,
-    aligned=False,
-    fraction=1.0,  # Added fraction parameter
-):
-    remove_neutral = False
-
-    return load_splits(
-        base_path,
-        dataset="mosei2",
-        modalities=modalities,
-        remove_pauses=remove_pauses,
-        remove_neutral=remove_neutral,
-        max_length=max_length,
-        pad_front=pad_front,
-        pad_back=pad_back,
-        cache=cache,
-        aligned=aligned,
-        fraction=fraction,  # Pass fraction here
-    )
 
 def data_pickle(fname):
     data = pickle_load(fname)

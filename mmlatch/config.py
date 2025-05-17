@@ -8,7 +8,6 @@ from mmlatch.util import yaml_load
 BASE_PATH = Path(__file__).parent.parent.absolute()
 
 def _nest(d):
-    """Convert a flat dictionary with dot-separated keys into a nested dictionary"""
     nested = defaultdict(dict)
     for key, val in d.items():
         if "." in key:
@@ -283,14 +282,6 @@ def augment_parser(parser):
         default=None,
         help="Resume optimizer",
     )
-    # parser.add_argument(
-    #     "--mask-index",
-    #     dest="model.mask_index",
-    #     type=int,
-    #     default=1,
-    #     choices=[1, 2, 3, 4, 5],
-    #     help="Masking strategy index (1: average, 2: max, 3: min, 4: residual, 5: max deviation from 0.5)",
-    # )
 
     return parser
 
@@ -337,7 +328,6 @@ SANE_DEFAULTS = {
 
 
 def _merge(*dicts):
-    """ecursively merges multiple dictionaries, allowing nested configurations to be combined intelligently."""
     if len(dicts) == 1:
         return dicts[0]
     merged = dicts[0]
