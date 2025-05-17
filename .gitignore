@@ -1,2 +1,4 @@
 CMU-MultimodalSDK/
 our_results/
+checkpoints/
+mmlatch/__pycache__/

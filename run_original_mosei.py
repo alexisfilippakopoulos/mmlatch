@@ -144,6 +144,9 @@ if __name__ == "__main__":
         feedback=C["model"]["feedback"],
         feedback_type=C["model"]["feedback_type"],
         device=C["device"],
+        mad_threshold= C["model"]["mad_threshold"],
+        mad_prob=C["model"]["mad_prob"],
+        enable_mad=C["model"]["enable_mad"],
         num_classes=C["num_classes"],
     )
 

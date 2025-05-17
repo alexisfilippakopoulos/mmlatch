@@ -31,6 +31,9 @@ model:
   noise_percentage_train: 0.2
   augment_train_data: false
   noise_percentage_test: 0.2
+  enable_mad: True
+  mad_prob: 0.6
+  mad_threshold: 0.35
 
 experiment:
   name: base-test

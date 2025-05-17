@@ -14,11 +14,19 @@ class FeedbackUnit(nn.Module):
         mask_type="learnable_sequence_mask",
         dropout=0.1,
         device="cpu",
+        mad_threshold=0.3,
+        mad_prob=0.5,
+        enable_mad=False,
     ):
         super(FeedbackUnit, self).__init__()
         self.mask_type = mask_type
         self.mod1_sz = mod1_sz
         self.hidden_dim = hidden_dim
+        self.device = device
+
+        self.mad_threshold = mad_threshold
+        self.mad_prob = mad_prob
+        self.enable_mad = enable_mad
 
         if mask_type == "learnable_sequence_mask":
             self.mask1 = RNN(hidden_dim, mod1_sz, dropout=dropout, device=device)
@@ -33,32 +41,48 @@ class FeedbackUnit(nn.Module):
         }
 
         self.get_mask = mask_fn[self.mask_type]
+        print(f"Modality-Aware Dropout: {enable_mad}, thr={mad_threshold}, p={mad_prob}")
 
     def _learnable_sequence_mask(self, y, z, lengths=None):
         oy, _, _ = self.mask1(y, lengths)
         oz, _, _ = self.mask2(z, lengths)
 
         lg = (torch.sigmoid(oy) + torch.sigmoid(oz)) * 0.5
-
-        mask = lg
-
-        return mask
+        return lg
 
     def _learnable_static_mask(self, y, z, lengths=None):
         y = self.mask1(y)
         z = self.mask2(z)
-        mask1 = torch.sigmoid(y)
-        mask2 = torch.sigmoid(z)
-        mask = (mask1 + mask2) * 0.5
-
+        mask = (torch.sigmoid(y) + torch.sigmoid(z)) * 0.5
         return mask
+
+    def apply_mad(self, x, mask):
+        # x: [B, L, D], mask: [B, L, D]
+        if not self.enable_mad:
+            return x
+
+        B = x.shape[0]
+        device = x.device
+        # shape: (B,)
+        mask_mean = mask.mean(dim=[1, 2])  
+
+        # dropout decision: 1 = keep, 0 = drop
+        keep_mask = torch.ones(B, device=device)
+
+        for i in range(B):
+            if mask_mean[i] < self.mad_threshold:
+                if torch.rand(1, device=device).item() < self.mad_prob:
+                    keep_mask[i] = 0.0
+        # broadcast to [B, 1, 1]
+        keep_mask = keep_mask.view(B, 1, 1)  
+        return x * keep_mask  
 
     def forward(self, x, y, z, lengths=None):
         mask = self.get_mask(y, z, lengths=lengths)
-        mask = F.dropout(mask, p=0.2)
-        x_new = x * mask
-
+        x = self.apply_mad(x, mask)
+        x_new = x * mask  
         return x_new
+
 
 
 class Feedback(nn.Module):
@@ -71,6 +95,9 @@ class Feedback(nn.Module):
         mask_type="learnable_sequence_mask",
         dropout=0.1,
         device="cpu",
+        mad_threshold=0.3,
+        mad_prob=0.5,
+        enable_mad=False,
     ):
         super(Feedback, self).__init__()
         self.f1 = FeedbackUnit(
@@ -79,6 +106,9 @@ class Feedback(nn.Module):
             mask_type=mask_type,
             dropout=dropout,
             device=device,
+            mad_threshold=mad_threshold,
+            mad_prob=mad_prob,
+            enable_mad=enable_mad,
         )
         self.f2 = FeedbackUnit(
             hidden_dim,
@@ -86,6 +116,9 @@ class Feedback(nn.Module):
             mask_type=mask_type,
             dropout=dropout,
             device=device,
+            mad_threshold=mad_threshold,
+            mad_prob=mad_prob,
+            enable_mad=enable_mad,
         )
         self.f3 = FeedbackUnit(
             hidden_dim,
@@ -93,6 +126,9 @@ class Feedback(nn.Module):
             mask_type=mask_type,
             dropout=dropout,
             device=device,
+            mad_threshold=mad_threshold,
+            mad_prob=mad_prob,
+            enable_mad=enable_mad,
         )
 
     def forward(self, low_x, low_y, low_z, hi_x, hi_y, hi_z, lengths=None):
@@ -412,6 +448,9 @@ class AVTEncoder(nn.Module):
         feedback=False,
         feedback_type="learnable_sequence_mask",
         device="cpu",
+        mad_threshold=0.3,
+        mad_prob=0.5,
+        enable_mad=False
     ):
         super(AVTEncoder, self).__init__()
         self.feedback = feedback
@@ -468,6 +507,9 @@ class AVTEncoder(nn.Module):
                 mask_type=feedback_type,
                 dropout=0.1,
                 device=device,
+                mad_threshold=mad_threshold,
+                mad_prob=mad_prob,
+                enable_mad=enable_mad
             )
 
     def _encode(self, txt, au, vi, lengths):
@@ -510,6 +552,9 @@ class AVTClassifier(nn.Module):
         feedback=False,
         feedback_type="learnable_sequence_mask",
         device="cpu",
+        mad_threshold=0.3,
+        mad_prob=0.5,
+        enable_mad=False,
         num_classes=1,
     ):
         super(AVTClassifier, self).__init__()
@@ -529,6 +574,9 @@ class AVTClassifier(nn.Module):
             feedback=feedback,
             feedback_type=feedback_type,
             device=device,
+            mad_threshold=mad_threshold,
+            mad_prob=mad_prob,
+            enable_mad=enable_mad
         )
 
         self.classifier = nn.Linear(self.encoder.out_size, num_classes)
