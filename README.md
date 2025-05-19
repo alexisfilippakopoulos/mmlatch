@@ -16,6 +16,6 @@ pip install -e .
 pip install numpy==1.24.4
 pip install validators==0.18
 cd ..
-python run_mosei.py --config config.yaml
+python run_original_mosei.py --config config.yaml
 ```
 </pre>
