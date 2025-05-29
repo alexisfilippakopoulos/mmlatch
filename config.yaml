@@ -31,13 +31,16 @@ model:
   noise_percentage_train: 0.2
   augment_train_data: false
   noise_percentage_test: 0.2
-  enable_mad: True
+  enable_mad: False
   mad_prob: 0.6
   mad_threshold: 0.35
 
 experiment:
   name: base-test
   description: MOSEI sentiment task
+  add_noise_to_test: True
+  add_noise_to_val: True
+  noise_std: 0.3
 
 dataloaders:
   batch_size: 32
@@ -50,7 +53,7 @@ optimizer:
 
 trainer:
   patience: 10
-  max_epochs: 100
+  max_epochs: 5
   retain_graph: true
-  load_model: mosei-sentiment-audio-text-visual_checkpoint.best.pth
+  load_model: base-test_checkpoint.best.pth
   checkpoint_dir: checkpoints

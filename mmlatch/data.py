@@ -71,9 +71,15 @@ class MOSEI(Dataset):
         select_label=None,
         modalities={"text", "audio"},
         transforms=None,
+        split="train",
+        add_noise=False,
+        noise_std=0.05
     ):
         data1 = {k: [] for k in data[0].keys()}
         self.data = []
+        self.split = split
+        self.noise_std = noise_std
+        self.add_noise = add_noise
 
         for dat in data:
             for k, v in dat.items():
@@ -127,5 +133,13 @@ class MOSEI(Dataset):
 
         if self.select_label is not None:
             dat["label"] = dat["label"][self.select_label]
+        
+        # add gaussian_noise with 0 mean and some variance
+        if (self.split == "test") and (self.add_noise):
+            for m in self.modalities:
+                if not isinstance(dat[m], torch.Tensor):
+                    dat[m] = torch.tensor(dat[m], dtype=torch.float32)
+                noise = torch.randn_like(dat[m]) * self.noise_std
+                dat[m] = dat[m] + noise
 
         return dat

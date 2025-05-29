@@ -107,8 +107,8 @@ if __name__ == "__main__":
     to_tensor = ToTensor(device="cpu")
     to_tensor_float = ToTensor(device="cpu", dtype=torch.float)
 
-    def create_dataloader(data, shuffle=True):
-        d = MOSEI(data, modalities=["text", "glove", "audio", "visual"], select_label=0)
+    def create_dataloader(data, shuffle=True, split="train", noise_std=0.05, add_noise=False):
+        d = MOSEI(data, modalities=["text", "glove", "audio", "visual"], select_label=0, split=split, noise_std=noise_std, add_noise=add_noise)
         d.map(to_tensor_float, "visual", lazy=True)
         d.map(to_tensor_float, "text", lazy=True)
         d = d.map(to_tensor_float, "audio", lazy=True)
@@ -124,9 +124,9 @@ if __name__ == "__main__":
 
         return dataloader
 
-    train_loader = create_dataloader(train)
-    dev_loader = create_dataloader(dev)
-    test_loader = create_dataloader(test)
+    train_loader = create_dataloader(train, split="train", noise_std=C["experiment"]["noise_std"], add_noise=False)
+    dev_loader = create_dataloader(dev, split="test", noise_std=C["experiment"]["noise_std"], add_noise=C["experiment"]["add_noise_to_val"])
+    test_loader = create_dataloader(test, split="test", noise_std=C["experiment"]["noise_std"], add_noise=C["experiment"]["add_noise_to_test"])
     print("Running with feedback = {}".format(C["model"]["feedback"]))
 
     model = AVTClassifier(
