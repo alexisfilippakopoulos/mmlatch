@@ -73,13 +73,17 @@ class MOSEI(Dataset):
         transforms=None,
         split="train",
         add_noise=False,
-        noise_std=0.05
+        noise_std=0.05,
+        drop_modality=False,
+        drop_prob=0.5
     ):
         data1 = {k: [] for k in data[0].keys()}
         self.data = []
         self.split = split
         self.noise_std = noise_std
         self.add_noise = add_noise
+        self.drop_modality = drop_modality
+        self.drop_prob = drop_prob
 
         for dat in data:
             for k, v in dat.items():
@@ -141,5 +145,14 @@ class MOSEI(Dataset):
                     dat[m] = torch.tensor(dat[m], dtype=torch.float32)
                 noise = torch.randn_like(dat[m]) * self.noise_std
                 dat[m] = dat[m] + noise
+                
+        # stochastically drop modalities with a probability
+        if (self.split == "test") and (self.drop_modality):
+            for m in self.modalities:
+                if torch.rand(1).item() < self.drop_prob:
+                    if not isinstance(dat[m], torch.Tensor):
+                        dat[m] = torch.tensor(dat[m], dtype=torch.float32)
+                    x = dat[m]
+                    dat[m] = torch.zeros_like(x)
 
         return dat

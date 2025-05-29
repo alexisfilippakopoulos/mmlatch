@@ -38,9 +38,11 @@ model:
 experiment:
   name: base-test
   description: MOSEI sentiment task
-  add_noise_to_test: True
-  add_noise_to_val: True
-  noise_std: 0.3
+  add_noise_to_test: False
+  add_noise_to_val: False
+  noise_std: 0.05
+  drop_modality_test: True
+  drop_modality_prob: 0.3
 
 dataloaders:
   batch_size: 32
@@ -53,7 +55,7 @@ optimizer:
 
 trainer:
   patience: 10
-  max_epochs: 5
+  max_epochs: 100
   retain_graph: true
   load_model: base-test_checkpoint.best.pth
   checkpoint_dir: checkpoints
