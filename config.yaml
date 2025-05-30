@@ -34,6 +34,7 @@ model:
   enable_mad: False
   mad_prob: 0.6
   mad_threshold: 0.35
+  track_masks: True
 
 experiment:
   name: base-test
@@ -55,7 +56,7 @@ optimizer:
 
 trainer:
   patience: 10
-  max_epochs: 100
+  max_epochs: 3
   retain_graph: true
   load_model: base-test_checkpoint.best.pth
   checkpoint_dir: checkpoints

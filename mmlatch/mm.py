@@ -17,6 +17,7 @@ class FeedbackUnit(nn.Module):
         mad_threshold=0.3,
         mad_prob=0.5,
         enable_mad=False,
+        track_masks=False
     ):
         super(FeedbackUnit, self).__init__()
         self.mask_type = mask_type
@@ -27,6 +28,7 @@ class FeedbackUnit(nn.Module):
         self.mad_threshold = mad_threshold
         self.mad_prob = mad_prob
         self.enable_mad = enable_mad
+        self.track_opt = track_masks
 
         if mask_type == "learnable_sequence_mask":
             self.mask1 = RNN(hidden_dim, mod1_sz, dropout=dropout, device=device)
@@ -77,9 +79,15 @@ class FeedbackUnit(nn.Module):
         keep_mask = keep_mask.view(B, 1, 1)  
         return x * keep_mask  
 
-    def forward(self, x, y, z, lengths=None):
+    def forward(self, x, y, z, lengths=None, track_masks=False):
         mask = self.get_mask(y, z, lengths=lengths)
-        x = self.apply_mad(x, mask)
+        if track_masks:
+            print("MASK", mask.shape)
+            print("INPUTS", x.shape)
+        #if self.track_opt and track_masks
+            # SAVE MASKS LOGIC
+        #x = self.apply_mad(x, mask)
+        mask = F.dropout(mask, p=0.2)
         x_new = x * mask  
         return x_new
 
@@ -98,6 +106,7 @@ class Feedback(nn.Module):
         mad_threshold=0.3,
         mad_prob=0.5,
         enable_mad=False,
+        track_masks=False
     ):
         super(Feedback, self).__init__()
         self.f1 = FeedbackUnit(
@@ -109,6 +118,7 @@ class Feedback(nn.Module):
             mad_threshold=mad_threshold,
             mad_prob=mad_prob,
             enable_mad=enable_mad,
+            track_masks=track_masks
         )
         self.f2 = FeedbackUnit(
             hidden_dim,
@@ -119,6 +129,7 @@ class Feedback(nn.Module):
             mad_threshold=mad_threshold,
             mad_prob=mad_prob,
             enable_mad=enable_mad,
+            track_masks=track_masks
         )
         self.f3 = FeedbackUnit(
             hidden_dim,
@@ -129,12 +140,13 @@ class Feedback(nn.Module):
             mad_threshold=mad_threshold,
             mad_prob=mad_prob,
             enable_mad=enable_mad,
+            track_masks=track_masks
         )
 
-    def forward(self, low_x, low_y, low_z, hi_x, hi_y, hi_z, lengths=None):
-        x = self.f1(low_x, hi_y, hi_z, lengths=lengths)
-        y = self.f2(low_y, hi_x, hi_z, lengths=lengths)
-        z = self.f3(low_z, hi_x, hi_y, lengths=lengths)
+    def forward(self, low_x, low_y, low_z, hi_x, hi_y, hi_z, lengths=None, track_masks=False):
+        x = self.f1(low_x, hi_y, hi_z, lengths=lengths, track_masks=track_masks)
+        y = self.f2(low_y, hi_x, hi_z, lengths=lengths, track_masks=track_masks)
+        z = self.f3(low_z, hi_x, hi_y, lengths=lengths, track_masks=track_masks)
 
         return x, y, z
 
@@ -450,7 +462,8 @@ class AVTEncoder(nn.Module):
         device="cpu",
         mad_threshold=0.3,
         mad_prob=0.5,
-        enable_mad=False
+        enable_mad=False,
+        track_masks=False
     ):
         super(AVTEncoder, self).__init__()
         self.feedback = feedback
@@ -509,7 +522,8 @@ class AVTEncoder(nn.Module):
                 device=device,
                 mad_threshold=mad_threshold,
                 mad_prob=mad_prob,
-                enable_mad=enable_mad
+                enable_mad=enable_mad,
+                track_masks=track_masks
             )
 
     def _encode(self, txt, au, vi, lengths):
@@ -524,10 +538,10 @@ class AVTEncoder(nn.Module):
 
         return fused
 
-    def forward(self, txt, au, vi, lengths):
+    def forward(self, txt, au, vi, lengths, track_masks=False):
         if self.feedback:
             txt1, au1, vi1 = self._encode(txt, au, vi, lengths)
-            txt, au, vi = self.fm(txt, au, vi, txt1, au1, vi1, lengths=lengths)
+            txt, au, vi = self.fm(txt, au, vi, txt1, au1, vi1, lengths=lengths, track_masks=track_masks)
 
         txt, au, vi = self._encode(txt, au, vi, lengths)
         fused = self._fuse(txt, au, vi, lengths)
@@ -555,6 +569,7 @@ class AVTClassifier(nn.Module):
         mad_threshold=0.3,
         mad_prob=0.5,
         enable_mad=False,
+        track_masks=False,
         num_classes=1,
     ):
         super(AVTClassifier, self).__init__()
@@ -576,14 +591,15 @@ class AVTClassifier(nn.Module):
             device=device,
             mad_threshold=mad_threshold,
             mad_prob=mad_prob,
-            enable_mad=enable_mad
+            enable_mad=enable_mad,
+            track_masks=track_masks
         )
 
         self.classifier = nn.Linear(self.encoder.out_size, num_classes)
 
-    def forward(self, inputs):
+    def forward(self, inputs, track_masks=False):
         out = self.encoder(
-            inputs["text"], inputs["audio"], inputs["visual"], inputs["lengths"]
+            inputs["text"], inputs["audio"], inputs["visual"], inputs["lengths"], track_masks=track_masks
         )
 
         return self.classifier(out)

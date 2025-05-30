@@ -145,10 +145,10 @@ class Trainer(object):
         return inputs, targets
 
     def get_predictions_and_targets(
-        self: TrainerType, batch: List[torch.Tensor]
+        self: TrainerType, batch: List[torch.Tensor], track_masks=False
     ) -> Tuple[torch.Tensor, ...]:
         inputs, targets = self.parse_batch(batch)
-        y_pred = self.model(inputs)
+        y_pred = self.model(inputs, track_masks)
 
         return y_pred, targets
 
@@ -183,13 +183,13 @@ class Trainer(object):
 
             return y_pred, targets
 
-    def predict(self: TrainerType, dataloader: DataLoader) -> State:
+    def predict(self: TrainerType, dataloader: DataLoader, track_masks=False) -> State:
         predictions, targets = [], []
 
         for batch in dataloader:
             self.model.eval()
             with torch.no_grad():
-                pred, targ = self.get_predictions_and_targets(batch)
+                pred, targ = self.get_predictions_and_targets(batch, track_masks)
                 predictions.append(pred)
                 targets.append(targ)
 
@@ -290,10 +290,10 @@ class MOSEITrainer(Trainer):
         return inputs, targets
 
     def get_predictions_and_targets(
-        self, batch: List[torch.Tensor]
+        self, batch: List[torch.Tensor], track_masks=False
     ) -> Tuple[torch.Tensor, ...]:
         inputs, targets = self.parse_batch(batch)
-        y_pred = self.model(inputs)
+        y_pred = self.model(inputs, track_masks)
         y_pred = y_pred.squeeze()
         targets = targets.squeeze()
 

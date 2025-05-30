@@ -147,6 +147,7 @@ if __name__ == "__main__":
         mad_threshold= C["model"]["mad_threshold"],
         mad_prob=C["model"]["mad_prob"],
         enable_mad=C["model"]["enable_mad"],
+        track_masks=C["model"]["track_masks"],
         num_classes=C["num_classes"],
     )
 
@@ -267,7 +268,7 @@ if __name__ == "__main__":
             device=C["device"],
         )
 
-        predictions, targets = trainer.predict(test_loader)
+        predictions, targets = trainer.predict(test_loader, track_masks=C["model"]["track_masks"])
 
         pred = torch.cat(predictions)
         y_test = torch.cat(targets)
