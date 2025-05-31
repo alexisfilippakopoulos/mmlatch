@@ -151,9 +151,6 @@ class Trainer(object):
     ) -> Tuple[torch.Tensor, ...]:
         inputs, targets = self.parse_batch(batch)
         y_pred = self.model(inputs, track_masks, self.path_to_save)
-        if track_masks:
-            pass
-            #logic to store preds, targets
 
         return y_pred, targets
 
@@ -191,12 +188,15 @@ class Trainer(object):
     def predict(self: TrainerType, dataloader: DataLoader, track_masks=False) -> State:
         predictions, targets = [], []
 
-        for batch in dataloader:
+        for idx, batch in enumerate(dataloader):
             self.model.eval()
             with torch.no_grad():
                 pred, targ = self.get_predictions_and_targets(batch, track_masks)
                 predictions.append(pred)
                 targets.append(targ)
+                if track_masks:
+                    torch.save(pred.cpu(), f"{self.path_to_save}/preds/batch_{idx + 1}.pt")
+                    torch.save(targ.cpu(), f"{self.path_to_save}/labels/batch_{idx + 1}.pt")
 
         return predictions, targets
 
@@ -299,11 +299,6 @@ class MOSEITrainer(Trainer):
     ) -> Tuple[torch.Tensor, ...]:
         inputs, targets = self.parse_batch(batch)
         y_pred = self.model(inputs, track_masks, self.path_to_save)
-        if track_masks:
-            pass
-            # logic to save preds targets
         y_pred = y_pred.squeeze()
         targets = targets.squeeze()
-
-
         return y_pred, targets
