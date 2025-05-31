@@ -24,6 +24,7 @@ class FeedbackUnit(nn.Module):
         self.mod1_sz = mod1_sz
         self.hidden_dim = hidden_dim
         self.device = device
+        self.batch_counter = 0
 
         self.mad_threshold = mad_threshold
         self.mad_prob = mad_prob
@@ -79,13 +80,11 @@ class FeedbackUnit(nn.Module):
         keep_mask = keep_mask.view(B, 1, 1)  
         return x * keep_mask  
 
-    def forward(self, x, y, z, lengths=None, track_masks=False):
+    def forward(self, x, y, z, lengths=None, track_masks=False, path_to_save=None, modal=None):
         mask = self.get_mask(y, z, lengths=lengths)
-        if track_masks:
-            print("MASK", mask.shape)
-            print("INPUTS", x.shape)
-        #if self.track_opt and track_masks
-            # SAVE MASKS LOGIC
+        if self.track_opt and track_masks:
+            self.batch_counter += 1
+            torch.save(mask, f"{path_to_save}/masks/mask_{modal}_batch_{self.batch_counter}.pt")
         #x = self.apply_mad(x, mask)
         mask = F.dropout(mask, p=0.2)
         x_new = x * mask  
@@ -143,10 +142,10 @@ class Feedback(nn.Module):
             track_masks=track_masks
         )
 
-    def forward(self, low_x, low_y, low_z, hi_x, hi_y, hi_z, lengths=None, track_masks=False):
-        x = self.f1(low_x, hi_y, hi_z, lengths=lengths, track_masks=track_masks)
-        y = self.f2(low_y, hi_x, hi_z, lengths=lengths, track_masks=track_masks)
-        z = self.f3(low_z, hi_x, hi_y, lengths=lengths, track_masks=track_masks)
+    def forward(self, low_x, low_y, low_z, hi_x, hi_y, hi_z, lengths=None, track_masks=False, path_to_save=None):
+        x = self.f1(low_x, hi_y, hi_z, lengths=lengths, track_masks=track_masks, path_to_save=path_to_save, modal="text")
+        y = self.f2(low_y, hi_x, hi_z, lengths=lengths, track_masks=track_masks, path_to_save=path_to_save, modal="audio")
+        z = self.f3(low_z, hi_x, hi_y, lengths=lengths, track_masks=track_masks, path_to_save=path_to_save, modal="visual")
 
         return x, y, z
 
@@ -538,10 +537,10 @@ class AVTEncoder(nn.Module):
 
         return fused
 
-    def forward(self, txt, au, vi, lengths, track_masks=False):
+    def forward(self, txt, au, vi, lengths, track_masks=False, path_to_save=None):
         if self.feedback:
             txt1, au1, vi1 = self._encode(txt, au, vi, lengths)
-            txt, au, vi = self.fm(txt, au, vi, txt1, au1, vi1, lengths=lengths, track_masks=track_masks)
+            txt, au, vi = self.fm(txt, au, vi, txt1, au1, vi1, lengths=lengths, track_masks=track_masks, path_to_save=path_to_save)
 
         txt, au, vi = self._encode(txt, au, vi, lengths)
         fused = self._fuse(txt, au, vi, lengths)
@@ -597,9 +596,9 @@ class AVTClassifier(nn.Module):
 
         self.classifier = nn.Linear(self.encoder.out_size, num_classes)
 
-    def forward(self, inputs, track_masks=False):
+    def forward(self, inputs, track_masks=False, path_to_save=None):
         out = self.encoder(
-            inputs["text"], inputs["audio"], inputs["visual"], inputs["lengths"], track_masks=track_masks
+            inputs["text"], inputs["audio"], inputs["visual"], inputs["lengths"], track_masks=track_masks, path_to_save=path_to_save
         )
 
         return self.classifier(out)

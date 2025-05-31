@@ -94,6 +94,11 @@ if __name__ == "__main__":
         cache=os.path.join(C["cache_dir"], "mosei_avt.p"),
     )
 
+    if C["model"]["track_masks"]:
+        safe_mkdirs(f'ablation_study/{C["experiment"]["name"]}/masks') 
+        safe_mkdirs(f'ablation_study/{C["experiment"]["name"]}/preds') 
+        safe_mkdirs(f'ablation_study/{C["experiment"]["name"]}/labels') 
+
     # Use GloVe features for text inputs
     for d in train:
         d["text"] = d["glove"]
@@ -266,8 +271,9 @@ if __name__ == "__main__":
             retain_graph=C["trainer"]["retain_graph"],
             loss_fn=criterion,
             device=C["device"],
+            path_to_save=f'ablation_study/{C["experiment"]["name"]}'
         )
-
+        print(len(test_loader))
         predictions, targets = trainer.predict(test_loader, track_masks=C["model"]["track_masks"])
 
         pred = torch.cat(predictions)

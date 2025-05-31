@@ -34,15 +34,18 @@ model:
   enable_mad: False
   mad_prob: 0.6
   mad_threshold: 0.35
+  # track feedback masks, preds, labels
   track_masks: True
 
 experiment:
-  name: base-test
+  name: base
   description: MOSEI sentiment task
+  # add gaussian noise with mean 0 and some std
   add_noise_to_test: False
   add_noise_to_val: False
   noise_std: 0.05
-  drop_modality_test: True
+  # randomly drop each modality with a prob p
+  drop_modality_test: False
   drop_modality_prob: 0.3
 
 dataloaders:
@@ -56,7 +59,7 @@ optimizer:
 
 trainer:
   patience: 10
-  max_epochs: 3
+  max_epochs: 1
   retain_graph: true
-  load_model: base-test_checkpoint.best.pth
+  load_model: base_checkpoint.best.pth
   checkpoint_dir: checkpoints

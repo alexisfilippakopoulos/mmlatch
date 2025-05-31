@@ -38,6 +38,7 @@ class Trainer(object):
         retain_graph: bool = False,
         dtype: torch.dtype = torch.float,
         device: str = "cpu",
+        path_to_save=None
     ) -> None:
         self.dtype = dtype
         self.retain_graph = retain_graph
@@ -48,6 +49,7 @@ class Trainer(object):
         self.patience = patience
         self.accumulation_steps = accumulation_steps
         self.checkpoint_dir = checkpoint_dir
+        self.path_to_save = path_to_save
 
         model_checkpoint = self._check_checkpoint(model_checkpoint)
         optimizer_checkpoint = self._check_checkpoint(optimizer_checkpoint)
@@ -148,7 +150,10 @@ class Trainer(object):
         self: TrainerType, batch: List[torch.Tensor], track_masks=False
     ) -> Tuple[torch.Tensor, ...]:
         inputs, targets = self.parse_batch(batch)
-        y_pred = self.model(inputs, track_masks)
+        y_pred = self.model(inputs, track_masks, self.path_to_save)
+        if track_masks:
+            pass
+            #logic to store preds, targets
 
         return y_pred, targets
 
@@ -293,8 +298,12 @@ class MOSEITrainer(Trainer):
         self, batch: List[torch.Tensor], track_masks=False
     ) -> Tuple[torch.Tensor, ...]:
         inputs, targets = self.parse_batch(batch)
-        y_pred = self.model(inputs, track_masks)
+        y_pred = self.model(inputs, track_masks, self.path_to_save)
+        if track_masks:
+            pass
+            # logic to save preds targets
         y_pred = y_pred.squeeze()
         targets = targets.squeeze()
+
 
         return y_pred, targets
