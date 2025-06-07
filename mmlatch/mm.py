@@ -46,12 +46,12 @@ class FeedbackUnit(nn.Module):
         self.get_mask = mask_fn[self.mask_type]
         print(f"Modality-Aware Dropout: {enable_mad}, thr={mad_threshold}, p={mad_prob}")
 
-    def _learnable_sequence_mask(self, y, z, lengths=None, track_masks=False):
+    def _learnable_sequence_mask(self, y, z, lengths=None, track_masks=False, return_masks=False):
         oy, _, _ = self.mask1(y, lengths)
         oz, _, _ = self.mask2(z, lengths)
         lg = (torch.sigmoid(oy) + torch.sigmoid(oz)) * 0.5
-        if self.track_opt and track_masks:
-            return oy, oz, lg
+        if (self.track_opt and track_masks) or (return_masks):
+            return torch.sigmoid(oy), torch.sigmoid(oz), lg
         return lg
 
     def _learnable_static_mask(self, y, z, lengths=None):
@@ -81,7 +81,7 @@ class FeedbackUnit(nn.Module):
         keep_mask = keep_mask.view(B, 1, 1)  
         return x * keep_mask  
 
-    def forward(self, x, y, z, lengths=None, track_masks=False, path_to_save=None, modal=None):
+    def forward(self, x, y, z, lengths=None, track_masks=False, path_to_save=None, modal=None, return_masks=False):
         if self.track_opt and track_masks:
             self.batch_counter += 1
             mask, f_y, f_z = self.get_mask(y, z, lengths=lengths, track_masks=True)
@@ -96,11 +96,18 @@ class FeedbackUnit(nn.Module):
                 torch.save(f_y, f"{path_to_save}/influence/text_to_{modal}/batch_{self.batch_counter}.pt")
                 torch.save(f_z, f"{path_to_save}/influence/audio_to_{modal}/batch_{self.batch_counter}.pt")
         else:
-            mask = self.get_mask(y, z, lengths=lengths)
+            if return_masks:
+                mask, f_y, f_z = self.get_mask(y, z, lengths=lengths, return_masks=True)
+            else:
+                mask = self.get_mask(y, z, lengths=lengths)
         #x = self.apply_mad(x, mask)
         mask = F.dropout(mask, p=0.2)
-        x_new = x * mask  
-        return x_new
+        x_new = x * mask 
+        if return_masks:
+            return x_new, f_y, f_z
+            #return x_new
+        else: 
+            return x_new
 
 
 
@@ -154,12 +161,17 @@ class Feedback(nn.Module):
             track_masks=track_masks
         )
 
-    def forward(self, low_x, low_y, low_z, hi_x, hi_y, hi_z, lengths=None, track_masks=False, path_to_save=None):
-        x = self.f1(low_x, hi_y, hi_z, lengths=lengths, track_masks=track_masks, path_to_save=path_to_save, modal="text")
-        y = self.f2(low_y, hi_x, hi_z, lengths=lengths, track_masks=track_masks, path_to_save=path_to_save, modal="audio")
-        z = self.f3(low_z, hi_x, hi_y, lengths=lengths, track_masks=track_masks, path_to_save=path_to_save, modal="visual")
-
-        return x, y, z
+    def forward(self, low_x, low_y, low_z, hi_x, hi_y, hi_z, lengths=None, track_masks=False, path_to_save=None, return_masks=False):
+        if return_masks:
+            x, au_to_txt, vis_to_txt = self.f1(low_x, hi_y, hi_z, lengths=lengths, track_masks=track_masks, path_to_save=path_to_save, modal="text", return_masks=return_masks)
+            y, txt_to_au, vis_to_au = self.f2(low_y, hi_x, hi_z, lengths=lengths, track_masks=track_masks, path_to_save=path_to_save, modal="audio", return_masks=return_masks)
+            z, txt_to_vis, au_to_vis = self.f3(low_z, hi_x, hi_y, lengths=lengths, track_masks=track_masks, path_to_save=path_to_save, modal="visual", return_masks=return_masks)
+            return x, y, z, au_to_txt, vis_to_txt, txt_to_au, vis_to_au, txt_to_vis, au_to_vis
+        else:
+            x = self.f1(low_x, hi_y, hi_z, lengths=lengths, track_masks=track_masks, path_to_save=path_to_save, modal="text", return_masks=return_masks)
+            y = self.f2(low_y, hi_x, hi_z, lengths=lengths, track_masks=track_masks, path_to_save=path_to_save, modal="audio", return_masks=return_masks)
+            z = self.f3(low_z, hi_x, hi_y, lengths=lengths, track_masks=track_masks, path_to_save=path_to_save, modal="visual", return_masks=return_masks)
+            return x, y, z
 
 
 class AttentionFuser(nn.Module):
@@ -549,15 +561,21 @@ class AVTEncoder(nn.Module):
 
         return fused
 
-    def forward(self, txt, au, vi, lengths, track_masks=False, path_to_save=None):
+    def forward(self, txt, au, vi, lengths, track_masks=False, path_to_save=None, return_masks=False):
         if self.feedback:
             txt1, au1, vi1 = self._encode(txt, au, vi, lengths)
-            txt, au, vi = self.fm(txt, au, vi, txt1, au1, vi1, lengths=lengths, track_masks=track_masks, path_to_save=path_to_save)
+            if return_masks:
+                txt, au, vi, au_to_txt, vis_to_txt, txt_to_au, vis_to_au, txt_to_vis, au_to_vis = self.fm(txt, au, vi, txt1, au1, vi1, lengths=lengths, track_masks=track_masks, path_to_save=path_to_save, return_masks=return_masks)
+            else:
+                txt, au, vi = self.fm(txt, au, vi, txt1, au1, vi1, lengths=lengths, track_masks=track_masks, path_to_save=path_to_save)
 
         txt, au, vi = self._encode(txt, au, vi, lengths)
         fused = self._fuse(txt, au, vi, lengths)
 
-        return fused
+        if return_masks:
+            return fused, au_to_txt, vis_to_txt, txt_to_au, vis_to_au, txt_to_vis, au_to_vis
+        else:
+            return fused
 
 
 class AVTClassifier(nn.Module):
@@ -608,9 +626,16 @@ class AVTClassifier(nn.Module):
 
         self.classifier = nn.Linear(self.encoder.out_size, num_classes)
 
-    def forward(self, inputs, track_masks=False, path_to_save=None):
-        out = self.encoder(
-            inputs["text"], inputs["audio"], inputs["visual"], inputs["lengths"], track_masks=track_masks, path_to_save=path_to_save
-        )
+    def forward(self, inputs, track_masks=False, path_to_save=None, return_masks=False):
+        if return_masks:
+            out, au_to_txt, vis_to_txt, txt_to_au, vis_to_au, txt_to_vis, au_to_vis = self.encoder(
+                inputs["text"], inputs["audio"], inputs["visual"], inputs["lengths"], track_masks=track_masks, path_to_save=path_to_save, return_masks=return_masks
+            )
 
-        return self.classifier(out)
+            return self.classifier(out), au_to_txt, vis_to_txt, txt_to_au, vis_to_au, txt_to_vis, au_to_vis
+        else:
+            out = self.encoder(
+                inputs["text"], inputs["audio"], inputs["visual"], inputs["lengths"], track_masks=track_masks, path_to_save=path_to_save, return_masks=return_masks
+            )
+
+            return self.classifier(out)

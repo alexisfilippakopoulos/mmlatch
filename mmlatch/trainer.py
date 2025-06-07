@@ -38,6 +38,7 @@ class Trainer(object):
         retain_graph: bool = False,
         dtype: torch.dtype = torch.float,
         device: str = "cpu",
+        regularization=None,
         path_to_save=None
     ) -> None:
         self.dtype = dtype
@@ -50,7 +51,7 @@ class Trainer(object):
         self.accumulation_steps = accumulation_steps
         self.checkpoint_dir = checkpoint_dir
         self.path_to_save = path_to_save
-
+        self.regularization = regularization
         model_checkpoint = self._check_checkpoint(model_checkpoint)
         optimizer_checkpoint = self._check_checkpoint(optimizer_checkpoint)
 
@@ -150,6 +151,7 @@ class Trainer(object):
         self: TrainerType, batch: List[torch.Tensor], track_masks=False
     ) -> Tuple[torch.Tensor, ...]:
         inputs, targets = self.parse_batch(batch)
+        print(inputs.__class__)
         y_pred = self.model(inputs, track_masks, self.path_to_save)
 
         return y_pred, targets
@@ -158,12 +160,25 @@ class Trainer(object):
         self: TrainerType, engine: Engine, batch: List[torch.Tensor]
     ) -> float:
         self.model.train()
-        y_pred, targets = self.get_predictions_and_targets(batch)
-        loss = self.loss_fn(y_pred, targets)  # type: ignore
+        if self.regularization is None:
+            y_pred, targets = self.get_predictions_and_targets(batch, return_masks=False)
+            loss = self.loss_fn(y_pred, targets)  # type: ignore
+            loss = loss / self.accumulation_steps
+        elif self.regularization == "l1":
+            y_pred, targets, au_to_txt, vis_to_txt, txt_to_au, vis_to_au, txt_to_vis, au_to_vis = self.get_predictions_and_targets(batch, return_masks=True)
+            loss = self.loss_fn(y_pred, targets)  # type: ignore
+            l1_reg = (torch.sum(torch.abs(au_to_txt)) + 
+                    torch.sum(torch.abs(vis_to_txt)) + 
+                    torch.sum(torch.abs(txt_to_au)) + 
+                    torch.sum(torch.abs(vis_to_au)) +
+                    torch.sum(torch.abs(txt_to_vis)) + 
+                    torch.sum(torch.abs(au_to_vis)))
+                    
 
-        loss = loss / self.accumulation_steps
+            loss = loss + (0.00001 / self.accumulation_steps) * l1_reg
+            loss = loss / self.accumulation_steps
+        
         loss.backward(retain_graph=self.retain_graph)
-
         if self.lr_scheduler is not None:
             if (engine.state.iteration - 1) % 128 == 0:
                 print("LR = {}".format(self.optimizer.param_groups[0]["lr"]))
@@ -299,10 +314,16 @@ class MOSEITrainer(Trainer):
         return inputs, targets
 
     def get_predictions_and_targets(
-        self, batch: List[torch.Tensor], track_masks=False
+        self, batch: List[torch.Tensor], track_masks=False, return_masks=False
     ) -> Tuple[torch.Tensor, ...]:
         inputs, targets = self.parse_batch(batch)
-        y_pred = self.model(inputs, track_masks, self.path_to_save)
+        if return_masks:
+            y_pred, au_to_txt, vis_to_txt, txt_to_au, vis_to_au, txt_to_vis, au_to_vis = self.model(inputs, track_masks, self.path_to_save, return_masks)
+        else:
+            y_pred = self.model(inputs, track_masks, self.path_to_save, return_masks)
         y_pred = y_pred.squeeze()
         targets = targets.squeeze()
-        return y_pred, targets
+        if return_masks:
+            return y_pred, targets, au_to_txt, vis_to_txt, txt_to_au, vis_to_au, txt_to_vis, au_to_vis
+        else:
+            return y_pred, targets

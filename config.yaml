@@ -15,7 +15,7 @@ model:
   text_layers: 1
   audio_layers: 1
   visual_layers: 1
-  bidirectional: true
+  bidirectional: True
   encoder_type: lstm
   dropout: !!float 0.2
   attention: true
@@ -59,7 +59,8 @@ optimizer:
 
 trainer:
   patience: 10
-  max_epochs: 1
-  retain_graph: true
+  max_epochs: 100
+  retain_graph: True
   load_model: base_checkpoint.best.pth
   checkpoint_dir: checkpoints
+  regularization: l1

@@ -251,6 +251,7 @@ if __name__ == "__main__":
             accumulation_steps=acc_steps,
             lr_scheduler=lr_scheduler,
             device=C["device"],
+            regularization=C["trainer"]["regularization"]
         )
 
     if C["debug"]:
@@ -280,7 +281,7 @@ if __name__ == "__main__":
             retain_graph=C["trainer"]["retain_graph"],
             loss_fn=criterion,
             device=C["device"],
-            path_to_save=f'ablation_study/{C["experiment"]["name"]}'
+            path_to_save=f'ablation_study/{C["experiment"]["name"]}',
         )
         
         predictions, targets = trainer.predict(test_loader, track_masks=C["model"]["track_masks"])
