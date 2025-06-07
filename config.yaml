@@ -59,7 +59,7 @@ optimizer:
 
 trainer:
   patience: 10
-  max_epochs: 1
+  max_epochs: 100
   retain_graph: true
   load_model: base_checkpoint.best.pth
   checkpoint_dir: checkpoints
