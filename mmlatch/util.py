@@ -224,3 +224,7 @@ def print_separator(
     symbol: str = "*", n: int = 10, print_fn: Callable[[str], None] = print
 ):
     print_fn(symbol * n)
+
+def print_emphatically(message: str):
+    decorated = f"\033[1;33m{'=' * 10} {message} {'=' * 10}\033[0m"
+    print(decorated)

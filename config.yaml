@@ -31,6 +31,9 @@ model:
   noise_percentage_train: 0.2
   augment_train_data: false
   noise_percentage_test: 0.2
+  memory_augmented:
+    fuser: true
+    unimodal: false
 
 experiment:
   name: base-test

@@ -79,7 +79,6 @@ collate_fn = MOSEICollator(
     device="cpu", modalities=["text", "audio", "visual"], max_length=-1
 )
 
-
 if __name__ == "__main__":
     print("Running with configuration")
     pprint(C)
@@ -145,6 +144,8 @@ if __name__ == "__main__":
         feedback_type=C["model"]["feedback_type"],
         device=C["device"],
         num_classes=C["num_classes"],
+        memory_augmented_fuser=C["model"]["memory_augmented"]["fuser"],
+        memory_augmented_unimodal=C["model"]["memory_augmented"]["unimodal"],
     )
 
     def count_parameters(model):

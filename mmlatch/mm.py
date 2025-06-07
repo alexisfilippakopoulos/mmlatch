@@ -4,6 +4,7 @@ import torch.nn.functional as F
 
 from mmlatch.attention import Attention, SymmetricAttention
 from mmlatch.rnn import RNN, AttentiveRNN
+from mmlatch.util import print_emphatically
 
 
 class FeedbackUnit(nn.Module):
@@ -158,8 +159,11 @@ class AttentionFuser(nn.Module):
 
 
 class AttRnnFuser(nn.Module):
-    def __init__(self, proj_sz=None, device="cpu", return_hidden=False):
+    def __init__(self, proj_sz=None, device="cpu", return_hidden=False, memory_augmented=False):
         super(AttRnnFuser, self).__init__()
+        if memory_augmented:
+            print_emphatically("We are using a MANN as the final fuser.")
+
         self.att_fuser = AttentionFuser(
             proj_sz=proj_sz,
             return_hidden=True,
@@ -173,6 +177,7 @@ class AttRnnFuser(nn.Module):
             attention=True,
             device=device,
             return_hidden=return_hidden,
+            memory_augmented=memory_augmented
         )
         self.out_size = self.rnn.out_size
 
@@ -373,8 +378,12 @@ class UnimodalEncoder(nn.Module):
         attention=True,
         return_hidden=False,
         device="cpu",
+        memory_augmented=False
     ):
         super(UnimodalEncoder, self).__init__()
+        if memory_augmented:
+            print_emphatically("Using MANN as UnimodalEncoder")
+
         self.encoder = AttentiveRNN(
             input_size,
             projection_size,
@@ -388,6 +397,7 @@ class UnimodalEncoder(nn.Module):
             attention=attention,
             device=device,
             return_hidden=return_hidden,
+            memory_augmented=memory_augmented
         )
         self.out_size = self.encoder.out_size
 
@@ -412,6 +422,8 @@ class AVTEncoder(nn.Module):
         feedback=False,
         feedback_type="learnable_sequence_mask",
         device="cpu",
+        memory_augmented_fuser=False,
+        memory_augmented_unimodal=False
     ):
         super(AVTEncoder, self).__init__()
         self.feedback = feedback
@@ -426,6 +438,7 @@ class AVTEncoder(nn.Module):
             attention=attention,
             return_hidden=True,
             device=device,
+            memory_augmented=memory_augmented_unimodal
         )
 
         self.audio = UnimodalEncoder(
@@ -438,6 +451,7 @@ class AVTEncoder(nn.Module):
             attention=attention,
             return_hidden=True,
             device=device,
+            memory_augmented=memory_augmented_unimodal
         )
 
         self.visual = UnimodalEncoder(
@@ -450,11 +464,13 @@ class AVTEncoder(nn.Module):
             attention=attention,
             return_hidden=True,
             device=device,
+            memory_augmented=memory_augmented_unimodal
         )
 
         self.fuser = AttRnnFuser(
             proj_sz=projection_size,
             device=device,
+            memory_augmented=memory_augmented_fuser
         )
 
         self.out_size = self.fuser.out_size
@@ -511,6 +527,8 @@ class AVTClassifier(nn.Module):
         feedback_type="learnable_sequence_mask",
         device="cpu",
         num_classes=1,
+        memory_augmented_fuser=False,
+        memory_augmented_unimodal=False
     ):
         super(AVTClassifier, self).__init__()
 
@@ -529,6 +547,8 @@ class AVTClassifier(nn.Module):
             feedback=feedback,
             feedback_type=feedback_type,
             device=device,
+            memory_augmented_fuser=memory_augmented_fuser,
+            memory_augmented_unimodal=memory_augmented_unimodal
         )
 
         self.classifier = nn.Linear(self.encoder.out_size, num_classes)

@@ -143,6 +143,95 @@ class RNN(nn.Module):
 
         return out, last_timestep, hidden
 
+class MemoryModule(nn.Module):
+    def __init__(self, memory_slots, memory_dim, controller_dim):
+        super().__init__()
+        self.memory_slots = memory_slots
+        self.memory_dim = memory_dim
+        self.controller_dim = controller_dim
+
+        self.memory = nn.Parameter(torch.randn(memory_slots, memory_dim))
+        self.key_layer = nn.Linear(controller_dim, memory_dim)
+        self.write_layer = nn.Linear(controller_dim, memory_dim)
+        self.erase_layer = nn.Linear(controller_dim, memory_dim)
+
+    def forward(self, controller_out):
+        """
+        controller_out: (B, controller_dim)
+        Returns:
+            memory_read: (B, memory_dim)
+        """
+        # Generate key vector
+        key = self.key_layer(controller_out)  # (B, memory_dim)
+
+        # Cosine similarity for memory addressing
+        mem_norm = self.memory / (self.memory.norm(dim=-1, keepdim=True) + 1e-8)
+        key_norm = key / (key.norm(dim=-1, keepdim=True) + 1e-8)
+
+        sim = torch.matmul(key_norm, mem_norm.t())  # (B, memory_slots)
+        weights = torch.softmax(sim, dim=-1)  # (B, memory_slots)
+
+        # Read from memory
+        memory_read = torch.matmul(weights, self.memory)  # (B, memory_dim)
+
+        # Optional: write to memory
+        erase = torch.sigmoid(self.erase_layer(controller_out))  # (B, memory_dim)
+        add = self.write_layer(controller_out)  # (B, memory_dim)
+        w_exp = weights.unsqueeze(-1)  # (B, memory_slots, 1)
+
+        erase = erase.unsqueeze(1)  # (B, 1, memory_dim)
+        add = add.unsqueeze(1)      # (B, 1, memory_dim)
+
+        with torch.no_grad():
+            updated_memory = self.memory * (1 - (w_exp * erase)).mean(0) + (w_exp * add).mean(0)
+            self.memory.copy_(updated_memory)
+
+        return memory_read
+
+    def reset_memory(self):
+        nn.init.randn_(self.memory)
+
+class DifferentiableMemory(nn.Module):
+    def __init__(self, memory_slots, memory_dim, controller_dim):
+        super().__init__()
+        self.memory_slots = memory_slots
+        self.memory_dim = memory_dim
+        self.controller_dim = controller_dim
+
+        self.memory = nn.Parameter(torch.randn(memory_slots, memory_dim))  # learnable
+        self.key_layer = nn.Linear(controller_dim, memory_dim)
+        self.erase_layer = nn.Linear(controller_dim, memory_dim)
+        self.write_layer = nn.Linear(controller_dim, memory_dim)
+
+    def _address_memory(self, key):
+        # key: (B, memory_dim)
+        mem_norm = self.memory / (self.memory.norm(dim=-1, keepdim=True) + 1e-8)
+        key_norm = key / (key.norm(dim=-1, keepdim=True) + 1e-8)
+        sim = torch.matmul(key_norm, mem_norm.t())  # (B, memory_slots)
+        weights = torch.softmax(sim, dim=-1)        # (B, memory_slots)
+        return weights
+
+    def read(self, controller_out):
+        key = self.key_layer(controller_out)        # (B, memory_dim)
+        weights = self._address_memory(key)         # (B, memory_slots)
+        memory_read = torch.matmul(weights, self.memory)  # (B, memory_dim)
+        return memory_read, weights
+
+    def write(self, controller_out, weights):
+        erase = torch.sigmoid(self.erase_layer(controller_out)).unsqueeze(1)  # (B, 1, memory_dim)
+        add = self.write_layer(controller_out).unsqueeze(1)                   # (B, 1, memory_dim)
+        weights = weights.unsqueeze(-1)                                       # (B, memory_slots, 1)
+
+        erase_matrix = (1 - weights * erase).mean(dim=0)                      # (memory_slots, memory_dim)
+        add_matrix = (weights * add).mean(dim=0)                              # (memory_slots, memory_dim)
+
+        # update memory with learned ops
+        self.memory.data = self.memory.data * erase_matrix + add_matrix
+
+    def forward(self, controller_out):
+        read_val, weights = self.read(controller_out)
+        self.write(controller_out, weights)
+        return read_val
 
 class AttentiveRNN(nn.Module):
     def __init__(
@@ -159,6 +248,7 @@ class AttentiveRNN(nn.Module):
         attention=False,
         return_hidden=False,
         device="cpu",
+        memory_augmented=False
     ):
         super(AttentiveRNN, self).__init__()
         self.device = device
@@ -181,6 +271,13 @@ class AttentiveRNN(nn.Module):
         if attention:
             self.attention = Attention(attention_size=self.out_size, dropout=dropout)
 
+        self.memory_augmented = memory_augmented
+        if memory_augmented:
+            self.memory_module = DifferentiableMemory(
+                memory_slots=20, memory_dim=hidden_size, controller_dim=self.out_size
+            )
+            self.memory_gate = nn.Linear(self.out_size, self.out_size)
+
     def forward(self, x, lengths, initial_hidden=None):
         out, last_hidden, _ = self.rnn(x, lengths, initial_hidden=initial_hidden)
 
@@ -188,10 +285,15 @@ class AttentiveRNN(nn.Module):
             out, _ = self.attention(
                 out, attention_mask=pad_mask(lengths, device=self.device)
             )
-
             if not self.return_hidden:
                 out = out.sum(1)
         else:
             out = last_hidden
 
+        if self.memory_augmented:
+            mem_out = self.memory_module(out)
+            gate = torch.sigmoid(self.memory_gate(out))
+            out = gate * out + (1 - gate) * mem_out
+
         return out
+
