@@ -1,4 +1,4 @@
-data_dir: CMU-MOSI
+data_dir: CMU-MOSEI
 results_dir: our_results
 train: true
 test: true
