@@ -274,7 +274,10 @@ class AttentiveRNN(nn.Module):
         self.memory_augmented = memory_augmented
         if memory_augmented:
             self.memory_module = DifferentiableMemory(
-                memory_slots=20, memory_dim=hidden_size, controller_dim=self.out_size
+                memory_slots=20,
+                # memory_dim=hidden_size,
+                memory_dim=self.out_size,  # match RNN output dim
+                controller_dim=self.out_size
             )
             self.memory_gate = nn.Linear(self.out_size, self.out_size)
 
