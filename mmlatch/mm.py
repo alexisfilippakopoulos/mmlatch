@@ -46,11 +46,11 @@ class FeedbackUnit(nn.Module):
         self.get_mask = mask_fn[self.mask_type]
         print(f"Modality-Aware Dropout: {enable_mad}, thr={mad_threshold}, p={mad_prob}")
 
-    def _learnable_sequence_mask(self, y, z, lengths=None):
+    def _learnable_sequence_mask(self, y, z, lengths=None, track_masks=False):
         oy, _, _ = self.mask1(y, lengths)
         oz, _, _ = self.mask2(z, lengths)
         lg = (torch.sigmoid(oy) + torch.sigmoid(oz)) * 0.5
-        if self.track_opt:
+        if self.track_opt and track_masks:
             return oy, oz, lg
         return lg
 
@@ -83,8 +83,18 @@ class FeedbackUnit(nn.Module):
 
     def forward(self, x, y, z, lengths=None, track_masks=False, path_to_save=None, modal=None):
         if self.track_opt and track_masks:
-            mask, f_y, f_z = self.get_mask(y, z, lengths=lengths)
-            torch.save(mask, f"{path_to_save}/audio_to_{modal}_influence/mask_{modal}_batch_{self.batch_counter}.pt")
+            self.batch_counter += 1
+            mask, f_y, f_z = self.get_mask(y, z, lengths=lengths, track_masks=True)
+            torch.save(mask, f"{path_to_save}/masks/mask_{modal}_batch_{self.batch_counter}.pt")
+            if modal == "text":
+                torch.save(f_y, f"{path_to_save}/influence/audio_to_{modal}/batch_{self.batch_counter}.pt")
+                torch.save(f_z, f"{path_to_save}/influence/visual_to_{modal}/batch_{self.batch_counter}.pt")
+            elif modal == "audio":
+                torch.save(f_y, f"{path_to_save}/influence/text_to_{modal}/batch_{self.batch_counter}.pt")
+                torch.save(f_z, f"{path_to_save}/influence/visual_to_{modal}/batch_{self.batch_counter}.pt")
+            else:
+                torch.save(f_y, f"{path_to_save}/influence/text_to_{modal}/batch_{self.batch_counter}.pt")
+                torch.save(f_z, f"{path_to_save}/influence/audio_to_{modal}/batch_{self.batch_counter}.pt")
         else:
             mask = self.get_mask(y, z, lengths=lengths)
         #x = self.apply_mad(x, mask)
