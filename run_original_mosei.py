@@ -95,6 +95,9 @@ if __name__ == "__main__":
     )
 
     if C["model"]["track_masks"]:
+        safe_mkdirs(f'ablation_study/{C["experiment"]["name"]}/inputs/audio')
+        safe_mkdirs(f'ablation_study/{C["experiment"]["name"]}/inputs/text')
+        safe_mkdirs(f'ablation_study/{C["experiment"]["name"]}/inputs/visual')
         safe_mkdirs(f'ablation_study/{C["experiment"]["name"]}/masks') 
         safe_mkdirs(f'ablation_study/{C["experiment"]["name"]}/preds') 
         safe_mkdirs(f'ablation_study/{C["experiment"]["name"]}/labels') 

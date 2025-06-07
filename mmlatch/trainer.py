@@ -197,6 +197,10 @@ class Trainer(object):
                 if track_masks:
                     torch.save(pred.cpu(), f"{self.path_to_save}/preds/batch_{idx + 1}.pt")
                     torch.save(targ.cpu(), f"{self.path_to_save}/labels/batch_{idx + 1}.pt")
+                    inputs, _ = self.parse_batch(batch)
+                    torch.save(inputs["text"].cpu(), f"{self.path_to_save}/inputs/text/batch_{idx + 1}.pt")
+                    torch.save(inputs["visual"].cpu(), f"{self.path_to_save}/inputs/visual/batch_{idx + 1}.pt")
+                    torch.save(inputs["audio"].cpu(), f"{self.path_to_save}/inputs/audio/batch_{idx + 1}.pt")
 
         return predictions, targets
 

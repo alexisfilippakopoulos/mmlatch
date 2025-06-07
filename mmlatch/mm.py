@@ -49,8 +49,9 @@ class FeedbackUnit(nn.Module):
     def _learnable_sequence_mask(self, y, z, lengths=None):
         oy, _, _ = self.mask1(y, lengths)
         oz, _, _ = self.mask2(z, lengths)
-
         lg = (torch.sigmoid(oy) + torch.sigmoid(oz)) * 0.5
+        if self.track_opt:
+            return oy, oz, lg
         return lg
 
     def _learnable_static_mask(self, y, z, lengths=None):
@@ -81,10 +82,11 @@ class FeedbackUnit(nn.Module):
         return x * keep_mask  
 
     def forward(self, x, y, z, lengths=None, track_masks=False, path_to_save=None, modal=None):
-        mask = self.get_mask(y, z, lengths=lengths)
         if self.track_opt and track_masks:
-            self.batch_counter += 1
-            torch.save(mask, f"{path_to_save}/masks/mask_{modal}_batch_{self.batch_counter}.pt")
+            mask, f_y, f_z = self.get_mask(y, z, lengths=lengths)
+            torch.save(mask, f"{path_to_save}/audio_to_{modal}_influence/mask_{modal}_batch_{self.batch_counter}.pt")
+        else:
+            mask = self.get_mask(y, z, lengths=lengths)
         #x = self.apply_mad(x, mask)
         mask = F.dropout(mask, p=0.2)
         x_new = x * mask  
