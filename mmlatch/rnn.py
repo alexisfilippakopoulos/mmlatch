@@ -276,21 +276,28 @@ class BetterMemory(nn.Module):
         self.memory.data = self.ln(updated_memory)  # normalize memory
 
     def forward(self, controller_seq):
-        """
-        controller_seq: (B, T, D)
-        returns: (B, T, D)
-        """
-        B, T, D = controller_seq.shape
-        out = []
-        for t in range(T):
-            c_t = controller_seq[:, t, :]  # (B, D)
-            read_val, weights = self.read(c_t)
-            self.write(c_t, weights)
-            g = torch.sigmoid(self.gate(c_t))  # (B, D)
-            out_t = g * c_t + (1 - g) * read_val
-            out.append(out_t.unsqueeze(1))
+        if controller_seq.dim() == 2:
+            # Shape: (B, D) — single timestep
+            read_val, weights = self.read(controller_seq)
+            self.write(controller_seq, weights)
+            g = torch.sigmoid(self.gate(controller_seq))
+            return g * controller_seq + (1 - g) * read_val
 
-        return torch.cat(out, dim=1)  # (B, T, D)
+        elif controller_seq.dim() == 3:
+            # Shape: (B, T, D) — full sequence
+            B, T, D = controller_seq.shape
+            out = []
+            for t in range(T):
+                c_t = controller_seq[:, t, :]
+                read_val, weights = self.read(c_t)
+                self.write(c_t, weights)
+                g = torch.sigmoid(self.gate(c_t))
+                out_t = g * c_t + (1 - g) * read_val
+                out.append(out_t.unsqueeze(1))
+            return torch.cat(out, dim=1)
+
+        else:
+            raise ValueError(f"Unsupported shape for controller_seq: {controller_seq.shape}")
 
 class AttentiveRNN(nn.Module):
     def __init__(
