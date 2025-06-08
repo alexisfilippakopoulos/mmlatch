@@ -39,7 +39,8 @@ class Trainer(object):
         dtype: torch.dtype = torch.float,
         device: str = "cpu",
         regularization=None,
-        path_to_save=None
+        path_to_save=None,
+        lambda_reg=0,
     ) -> None:
         self.dtype = dtype
         self.retain_graph = retain_graph
@@ -52,6 +53,7 @@ class Trainer(object):
         self.checkpoint_dir = checkpoint_dir
         self.path_to_save = path_to_save
         self.regularization = regularization
+        self.lambda_reg = lambda_reg
         model_checkpoint = self._check_checkpoint(model_checkpoint)
         optimizer_checkpoint = self._check_checkpoint(optimizer_checkpoint)
 
@@ -159,12 +161,8 @@ class Trainer(object):
     def train_step(
         self: TrainerType, engine: Engine, batch: List[torch.Tensor]
     ) -> float:
-        self.model.train()
-        if self.regularization is None:
-            y_pred, targets = self.get_predictions_and_targets(batch, return_masks=False)
-            loss = self.loss_fn(y_pred, targets)  # type: ignore
-            loss = loss / self.accumulation_steps
-        elif self.regularization == "l1":
+        self.model.train()   
+        if self.regularization == "l1":
             y_pred, targets, au_to_txt, vis_to_txt, txt_to_au, vis_to_au, txt_to_vis, au_to_vis = self.get_predictions_and_targets(batch, return_masks=True)
             loss = self.loss_fn(y_pred, targets)  # type: ignore
             l1_reg = (torch.sum(torch.abs(au_to_txt)) + 
@@ -173,9 +171,22 @@ class Trainer(object):
                     torch.sum(torch.abs(vis_to_au)) +
                     torch.sum(torch.abs(txt_to_vis)) + 
                     torch.sum(torch.abs(au_to_vis)))
-                    
-
-            loss = loss + (0.00001 / self.accumulation_steps) * l1_reg
+            loss = loss + (self.lambda_reg / self.accumulation_steps) * l1_reg
+            loss = loss / self.accumulation_steps 
+        elif self.regularization == "l2":
+            y_pred, targets, au_to_txt, vis_to_txt, txt_to_au, vis_to_au, txt_to_vis, au_to_vis = self.get_predictions_and_targets(batch, return_masks=True)
+            loss = self.loss_fn(y_pred, targets)  # type: ignore
+            l2_reg = (torch.sum(au_to_txt ** 2) + 
+                    torch.sum(vis_to_txt ** 2) + 
+                    torch.sum(txt_to_au ** 2) + 
+                    torch.sum(vis_to_au ** 2) +
+                    torch.sum(txt_to_vis ** 2) + 
+                    torch.sum(au_to_vis ** 2))            
+            loss = loss + (self.lambda_reg / self.accumulation_steps) * l2_reg
+            loss = loss / self.accumulation_steps
+        else:
+            y_pred, targets = self.get_predictions_and_targets(batch, return_masks=False)
+            loss = self.loss_fn(y_pred, targets)  # type: ignore
             loss = loss / self.accumulation_steps
         
         loss.backward(retain_graph=self.retain_graph)

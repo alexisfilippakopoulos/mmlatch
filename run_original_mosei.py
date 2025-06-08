@@ -142,7 +142,7 @@ if __name__ == "__main__":
     dev_loader = create_dataloader(dev, split="test", noise_std=C["experiment"]["noise_std"], add_noise=C["experiment"]["add_noise_to_val"])
     test_loader = create_dataloader(test, split="test", noise_std=C["experiment"]["noise_std"], add_noise=C["experiment"]["add_noise_to_test"])
     print("Running with feedback = {}".format(C["model"]["feedback"]))
-
+    torch.manual_seed(32)
     model = AVTClassifier(
         C["model"]["text_input_size"],
         C["model"]["audio_input_size"],
@@ -251,7 +251,8 @@ if __name__ == "__main__":
             accumulation_steps=acc_steps,
             lr_scheduler=lr_scheduler,
             device=C["device"],
-            regularization=C["trainer"]["regularization"]
+            regularization=C["trainer"]["regularization"],
+            lambda_reg=C["trainer"]["lambda_reg"]
         )
 
     if C["debug"]:

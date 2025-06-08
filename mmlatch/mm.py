@@ -32,7 +32,9 @@ class FeedbackUnit(nn.Module):
         self.track_opt = track_masks
 
         if mask_type == "learnable_sequence_mask":
+            torch.manual_seed(32)
             self.mask1 = RNN(hidden_dim, mod1_sz, dropout=dropout, device=device)
+            torch.manual_seed(32)
             self.mask2 = RNN(hidden_dim, mod1_sz, dropout=dropout, device=device)
         else:
             self.mask1 = nn.Linear(hidden_dim, mod1_sz)
@@ -127,6 +129,7 @@ class Feedback(nn.Module):
         track_masks=False
     ):
         super(Feedback, self).__init__()
+        torch.manual_seed(32)
         self.f1 = FeedbackUnit(
             hidden_dim,
             mod1_sz,
@@ -138,6 +141,7 @@ class Feedback(nn.Module):
             enable_mad=enable_mad,
             track_masks=track_masks
         )
+        torch.manual_seed(32)
         self.f2 = FeedbackUnit(
             hidden_dim,
             mod2_sz,
@@ -149,6 +153,7 @@ class Feedback(nn.Module):
             enable_mad=enable_mad,
             track_masks=track_masks
         )
+        torch.manual_seed(32)
         self.f3 = FeedbackUnit(
             hidden_dim,
             mod3_sz,
@@ -231,11 +236,13 @@ class AttentionFuser(nn.Module):
 class AttRnnFuser(nn.Module):
     def __init__(self, proj_sz=None, device="cpu", return_hidden=False):
         super(AttRnnFuser, self).__init__()
+        torch.manual_seed(32)
         self.att_fuser = AttentionFuser(
             proj_sz=proj_sz,
             return_hidden=True,
             device=device,
         )
+        torch.manual_seed(32)
         self.rnn = AttentiveRNN(
             self.att_fuser.out_size,
             proj_sz,
@@ -446,6 +453,7 @@ class UnimodalEncoder(nn.Module):
         device="cpu",
     ):
         super(UnimodalEncoder, self).__init__()
+        torch.manual_seed(32)
         self.encoder = AttentiveRNN(
             input_size,
             projection_size,
@@ -490,7 +498,7 @@ class AVTEncoder(nn.Module):
     ):
         super(AVTEncoder, self).__init__()
         self.feedback = feedback
-
+        torch.manual_seed(32)
         self.text = UnimodalEncoder(
             text_input_size,
             projection_size,
@@ -502,7 +510,7 @@ class AVTEncoder(nn.Module):
             return_hidden=True,
             device=device,
         )
-
+        torch.manual_seed(32)
         self.audio = UnimodalEncoder(
             audio_input_size,
             projection_size,
@@ -514,7 +522,7 @@ class AVTEncoder(nn.Module):
             return_hidden=True,
             device=device,
         )
-
+        torch.manual_seed(32)
         self.visual = UnimodalEncoder(
             visual_input_size,
             projection_size,
@@ -526,7 +534,7 @@ class AVTEncoder(nn.Module):
             return_hidden=True,
             device=device,
         )
-
+        torch.manual_seed(32)
         self.fuser = AttRnnFuser(
             proj_sz=projection_size,
             device=device,
@@ -535,6 +543,7 @@ class AVTEncoder(nn.Module):
         self.out_size = self.fuser.out_size
 
         if feedback:
+            torch.manual_seed(32)
             self.fm = Feedback(
                 projection_size,
                 text_input_size,
@@ -602,7 +611,7 @@ class AVTClassifier(nn.Module):
         num_classes=1,
     ):
         super(AVTClassifier, self).__init__()
-
+        torch.manual_seed(32)
         self.encoder = AVTEncoder(
             text_input_size,
             audio_input_size,
