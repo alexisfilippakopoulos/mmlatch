@@ -38,7 +38,7 @@ model:
   track_masks: True
 
 experiment:
-  name: base
+  name: l1_reg
   description: MOSEI sentiment task
   # add gaussian noise with mean 0 and some std
   add_noise_to_test: False
@@ -61,8 +61,8 @@ trainer:
   patience: 10
   max_epochs: 100
   retain_graph: True
-  load_model: base_checkpoint.best.pth
+  load_model: l1_reg.best.pth
   checkpoint_dir: checkpoints
   # can be l1, l2 or None
-  regularization: None
+  regularization: l1
   lambda_reg: 0.0000001
