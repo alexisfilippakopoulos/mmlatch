@@ -1,0 +1,69 @@
+data_dir: CMU-MOSI
+results_dir: our_results
+train: true
+test: true
+overfit_batch: false
+debug: false
+device: cuda
+num_classes: 1
+
+model:
+  text_input_size: 300
+  audio_input_size: 74
+  visual_input_size: 35
+  projection_size: 100
+  text_layers: 1
+  audio_layers: 1
+  visual_layers: 1
+  bidirectional: True
+  encoder_type: lstm
+  dropout: !!float 0.2
+  attention: true
+  feedback: true
+  feedback_type: learnable_sequence_mask
+  mask_index_train: 1
+  mask_index_test: 1
+  mask_dropout_train: 0.0
+  mask_dropout_test: 0.0
+  enable_plot_embeddings: true
+  noise_type: gaussian
+  noise_modality: text 
+  noise_percentage_train: 0.2
+  augment_train_data: false
+  noise_percentage_test: 0.2
+  enable_mad: False
+  mad_prob: 0.6
+  mad_threshold: 0.35
+  # track feedback masks, preds, labels
+  track_masks: True
+
+experiment:
+  name: l1
+  description: MOSEI sentiment task
+  # add gaussian noise with mean 0 and some std
+  add_noise_to_test: True
+  add_noise_to_val: True
+  noise_std: 0.5
+  # randomly drop each modality with a prob p
+  drop_modality_test: False
+  drop_modality_prob: 0.3
+
+dataloaders:
+  batch_size: 32
+  num_workers: 1
+  pin_memory: false
+
+optimizer:
+  name: Adam
+  learning_rate: !!float 5e-4
+
+trainer:
+  patience: 10
+  max_epochs: 100
+  retain_graph: True
+  # base_checkpoint.best.pth or l1_checkpoint.best.pth
+  load_model: l1_checkpoint.best.pth
+  checkpoint_dir: checkpoints
+  # can be l1, l2 or None
+  regularization: l1
+  lambda_reg: 0.0000001

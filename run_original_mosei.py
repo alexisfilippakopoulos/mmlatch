@@ -298,6 +298,18 @@ if __name__ == "__main__":
         metrics = eval_mosei_senti(pred, y_test, True)
         print_metrics(metrics)
 
+        if C["experiment"]["add_noise_to_test"]:
+            header = f'\n{C["experiment"]["name"]} (std: {C["experiment"]["noise_std"]}) lambda={C["trainer"]["lambda_reg"]}\n\n'
+        elif C["experiment"]["drop_modality_test"]:
+            header = f'\n{C["experiment"]["name"]} (drop prob: {C["experiment"]["drop_modality_prob"]}) lambda={C["trainer"]["lambda_reg"]}\n\n'
+        else:
+            header = f'\n{C["experiment"]["name"]} (baseline) lambda={C["trainer"]["lambda_reg"]}\n\n'
+        with open("experiment_logging.txt", "a") as f:
+            f.write(header)
+            for k, v in metrics.items():
+                line = "{}:\t{}\n".format(k, v)
+                f.write(line)
+
         results_dir = C["results_dir"]
         safe_mkdirs(results_dir)
         fname = uuid.uuid1().hex
