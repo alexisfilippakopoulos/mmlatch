@@ -69,6 +69,8 @@ def get_parser():
         dest="results_dir",
         help="Results directory",
     )
+    parser.add_argument("--mann-fuser", dest="model.memory_augmented.fuser", action="store_true")
+    parser.add_argument("--mann-unimodal", dest="model.memory_augmented.unimodal", action="store_true")
 
     return parser
 
