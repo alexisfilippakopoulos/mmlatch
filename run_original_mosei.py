@@ -71,6 +71,7 @@ def get_parser():
     )
     parser.add_argument("--mann-fuser", dest="model.memory_augmented.fuser", action="store_true")
     parser.add_argument("--mann-unimodal", dest="model.memory_augmented.unimodal", action="store_true")
+    parser.add_argument("--mann-feedback", dest="model.memory_augmented.feedback", action="store_true")
 
     return parser
 
@@ -148,6 +149,7 @@ if __name__ == "__main__":
         num_classes=C["num_classes"],
         memory_augmented_fuser=C["model"]["memory_augmented"]["fuser"],
         memory_augmented_unimodal=C["model"]["memory_augmented"]["unimodal"],
+        memory_augmented_feedback=C["model"]["memory_augmented"]["feedback"],
     )
 
     def count_parameters(model):

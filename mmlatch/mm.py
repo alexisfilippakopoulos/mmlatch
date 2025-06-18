@@ -15,6 +15,7 @@ class FeedbackUnit(nn.Module):
         mask_type="learnable_sequence_mask",
         dropout=0.1,
         device="cpu",
+        memory_augmented=False,
     ):
         super(FeedbackUnit, self).__init__()
         self.mask_type = mask_type
@@ -22,8 +23,8 @@ class FeedbackUnit(nn.Module):
         self.hidden_dim = hidden_dim
 
         if mask_type == "learnable_sequence_mask":
-            self.mask1 = RNN(hidden_dim, mod1_sz, dropout=dropout, device=device)
-            self.mask2 = RNN(hidden_dim, mod1_sz, dropout=dropout, device=device)
+            self.mask1 = RNN(hidden_dim, mod1_sz, dropout=dropout, device=device, memory_augmented=memory_augmented)
+            self.mask2 = RNN(hidden_dim, mod1_sz, dropout=dropout, device=device, memory_augmented=memory_augmented)
         else:
             self.mask1 = nn.Linear(hidden_dim, mod1_sz)
             self.mask2 = nn.Linear(hidden_dim, mod1_sz)
@@ -72,6 +73,7 @@ class Feedback(nn.Module):
         mask_type="learnable_sequence_mask",
         dropout=0.1,
         device="cpu",
+        memory_augmented=False,
     ):
         super(Feedback, self).__init__()
         self.f1 = FeedbackUnit(
@@ -80,6 +82,7 @@ class Feedback(nn.Module):
             mask_type=mask_type,
             dropout=dropout,
             device=device,
+            memory_augmented=memory_augmented,
         )
         self.f2 = FeedbackUnit(
             hidden_dim,
@@ -87,6 +90,7 @@ class Feedback(nn.Module):
             mask_type=mask_type,
             dropout=dropout,
             device=device,
+            memory_augmented=memory_augmented,
         )
         self.f3 = FeedbackUnit(
             hidden_dim,
@@ -94,6 +98,7 @@ class Feedback(nn.Module):
             mask_type=mask_type,
             dropout=dropout,
             device=device,
+            memory_augmented=memory_augmented,
         )
 
     def forward(self, low_x, low_y, low_z, hi_x, hi_y, hi_z, lengths=None):
@@ -423,7 +428,8 @@ class AVTEncoder(nn.Module):
         feedback_type="learnable_sequence_mask",
         device="cpu",
         memory_augmented_fuser=False,
-        memory_augmented_unimodal=False
+        memory_augmented_unimodal=False,
+        memory_augmented_feedback=False,
     ):
         super(AVTEncoder, self).__init__()
         self.feedback = feedback
@@ -484,6 +490,7 @@ class AVTEncoder(nn.Module):
                 mask_type=feedback_type,
                 dropout=0.1,
                 device=device,
+                memory_augmented=memory_augmented_feedback,
             )
 
     def _encode(self, txt, au, vi, lengths):
@@ -528,7 +535,8 @@ class AVTClassifier(nn.Module):
         device="cpu",
         num_classes=1,
         memory_augmented_fuser=False,
-        memory_augmented_unimodal=False
+        memory_augmented_unimodal=False,
+        memory_augmented_feedback=False
     ):
         super(AVTClassifier, self).__init__()
 
@@ -548,7 +556,8 @@ class AVTClassifier(nn.Module):
             feedback_type=feedback_type,
             device=device,
             memory_augmented_fuser=memory_augmented_fuser,
-            memory_augmented_unimodal=memory_augmented_unimodal
+            memory_augmented_unimodal=memory_augmented_unimodal,
+            memory_augmented_feedback=memory_augmented_feedback,
         )
 
         self.classifier = nn.Linear(self.encoder.out_size, num_classes)

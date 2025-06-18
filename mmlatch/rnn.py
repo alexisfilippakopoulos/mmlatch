@@ -50,6 +50,7 @@ class RNN(nn.Module):
         rnn_type="lstm",
         packed_sequence=True,
         device="cpu",
+        memory_augmented=False,
     ):
 
         super(RNN, self).__init__()
@@ -79,6 +80,15 @@ class RNN(nn.Module):
         if packed_sequence:
             self.pack = PackSequence(batch_first=batch_first)
             self.unpack = PadPackedSequence(batch_first=batch_first)
+
+        self.memory_augmented = memory_augmented
+        if memory_augmented:
+            self.memory_module = MemoryModule(
+                memory_slots=32,
+                memory_dim=self.out_size,  # match RNN output dim
+                controller_dim=self.out_size
+            )
+            self.memory_gate = nn.Linear(self.out_size, self.out_size)
 
     def _merge_bi(self, forward, backward):
         if self.merge_bi == "sum":
@@ -143,6 +153,11 @@ class RNN(nn.Module):
         last_timestep = self._final_output(out, lengths)
         out = self.merge_hidden_bi(out)
 
+        if self.memory_augmented:
+            mem_out = self.memory_module(out)
+            gate = torch.sigmoid(self.memory_gate(out))
+            out = gate * out + (1 - gate) * mem_out
+
         return out, last_timestep, hidden
 
 class AttentiveRNN(nn.Module):
@@ -186,7 +201,7 @@ class AttentiveRNN(nn.Module):
         self.memory_augmented = memory_augmented
         if memory_augmented:
             self.memory_module = MemoryModule(
-                memory_slots=20,
+                memory_slots=32,
                 # memory_dim=hidden_size,
                 memory_dim=self.out_size,  # match RNN output dim
                 controller_dim=self.out_size

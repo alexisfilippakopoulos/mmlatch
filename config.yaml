@@ -34,7 +34,7 @@ model:
   memory_augmented:
     fuser: true
     unimodal: false
-
+    feedback: false
 experiment:
   name: base-test
   description: MOSEI sentiment task
