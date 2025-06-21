@@ -1,13 +1,10 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
-
 from mmlatch.attention import Attention
 from mmlatch.memory import MemoryModule
 from mmlatch.util import pad_mask
-
 
 class PadPackedSequence(nn.Module):
     """Some Information about PadPackedSequence"""
@@ -23,7 +20,6 @@ class PadPackedSequence(nn.Module):
         )
         return x
 
-
 class PackSequence(nn.Module):
     def __init__(self, batch_first=True):
         super(PackSequence, self).__init__()
@@ -35,7 +31,6 @@ class PackSequence(nn.Module):
         )
         lengths = lengths[x.sorted_indices]
         return x, lengths
-
 
 class RNN(nn.Module):
     def __init__(
@@ -154,9 +149,9 @@ class RNN(nn.Module):
         out = self.merge_hidden_bi(out)
 
         if self.memory_augmented:
-            mem_out = self.memory_module(out)
-            gate = torch.sigmoid(self.memory_gate(out))
-            out = gate * out + (1 - gate) * mem_out
+            mem_out = self.memory_module(last_timestep)
+            gate = torch.sigmoid(self.memory_gate(last_timestep))
+            last_timestep = gate * last_timestep + (1 - gate) * mem_out
 
         return out, last_timestep, hidden
 
