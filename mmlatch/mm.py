@@ -18,6 +18,9 @@ class FeedbackUnit(nn.Module):
         memory_augmented=False,
     ):
         super(FeedbackUnit, self).__init__()
+        if memory_augmented:
+            print_emphatically("We are using MANN as Feedback Unit.")
+
         self.mask_type = mask_type
         self.mod1_sz = mod1_sz
         self.hidden_dim = hidden_dim
