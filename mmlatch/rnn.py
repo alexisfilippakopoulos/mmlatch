@@ -149,9 +149,12 @@ class RNN(nn.Module):
         out = self.merge_hidden_bi(out)
 
         if self.memory_augmented:
-            mem_out = self.memory_module(last_timestep)
-            gate = torch.sigmoid(self.memory_gate(last_timestep))
-            last_timestep = gate * last_timestep + (1 - gate) * mem_out
+            # mem_out = self.memory_module(last_timestep)
+            # gate = torch.sigmoid(self.memory_gate(last_timestep))
+            # last_timestep = gate * last_timestep + (1 - gate) * mem_out
+            mem_out = self.memory_module(out)  # shape: [B, L, D]
+            gate = torch.sigmoid(self.memory_gate(out))  # shape: [B, L, D]
+            out = gate * out + (1 - gate) * mem_out
 
         return out, last_timestep, hidden
 
