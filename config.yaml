@@ -44,6 +44,7 @@ model:
 experiment:
   name: l1_reg
   description: MOSEI sentiment task
+  repeat: 5
   # add gaussian noise with mean 0 and some std
   add_noise_to_test: False
   add_noise_to_val: False

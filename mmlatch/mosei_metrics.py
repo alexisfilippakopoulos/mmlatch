@@ -147,3 +147,20 @@ def eval_iemocap(results, truths, single=-1):
         results["{}_f1".format(emos[emo_ind])] = f1
 
     return results
+
+def average_and_best_metrics(metrics_list, key="f1", mode="max"):
+    avg = {}
+    keys = metrics_list[0].keys()
+    for k in keys:
+        values = [m[k] for m in metrics_list]
+        avg[k] = sum(values) / len(values)
+
+    if mode == "max":
+        best_idx = max(range(len(metrics_list)), key=lambda i: metrics_list[i][key])
+    elif mode == "min":
+        best_idx = min(range(len(metrics_list)), key=lambda i: metrics_list[i][key])
+    else:
+        raise ValueError("mode must be either 'max' or 'min'")
+
+    best = metrics_list[best_idx]
+    return avg, best

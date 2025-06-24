@@ -2,6 +2,7 @@ import argparse
 import os
 import sys
 from pprint import pprint
+import gc
 
 import torch
 import torch.nn as nn
@@ -15,6 +16,7 @@ from mmlatch.data import MOSEI, MOSEICollator, ToTensor
 from mmlatch.mm import AudioVisualTextClassifier, AVTClassifier
 from mmlatch.trainer import MOSEITrainer
 from mmlatch.util import safe_mkdirs
+from mmlatch.mosei_metrics import average_and_best_metrics
 
 
 class BCE(nn.Module):
@@ -73,6 +75,9 @@ def get_parser():
     parser.add_argument("--mann-unimodal", dest="model.memory_augmented.unimodal", action="store_true")
     parser.add_argument("--mann-feedback", dest="model.memory_augmented.feedback", action="store_true")
 
+    parser.add_argument("--repeat", dest="experiment.repeat", type=int, default=1,
+                        help="Number of experiment repetitions")
+
     return parser
 
 
@@ -83,241 +88,259 @@ collate_fn = MOSEICollator(
 )
 
 if __name__ == "__main__":
-    print("Running with configuration")
-    pprint(C)
-    train, dev, test, vocab = mosei(
-        C["data_dir"],
-        modalities=["text", "glove", "audio", "visual"],
-        remove_pauses=False,
-        max_length=-1,
-        pad_front=True,
-        pad_back=False,
-        aligned=False,
-        cache=os.path.join(C["cache_dir"], "mosei_avt.p"),
-    )
-
-    if C["model"]["track_masks"]:
-        safe_mkdirs(f'ablation_study/{C["experiment"]["name"]}/inputs/audio')
-        safe_mkdirs(f'ablation_study/{C["experiment"]["name"]}/inputs/text')
-        safe_mkdirs(f'ablation_study/{C["experiment"]["name"]}/inputs/visual')
-        safe_mkdirs(f'ablation_study/{C["experiment"]["name"]}/influence/text_to_audio')
-        safe_mkdirs(f'ablation_study/{C["experiment"]["name"]}/influence/text_to_visual')
-        safe_mkdirs(f'ablation_study/{C["experiment"]["name"]}/influence/visual_to_audio')
-        safe_mkdirs(f'ablation_study/{C["experiment"]["name"]}/influence/visual_to_text')
-        safe_mkdirs(f'ablation_study/{C["experiment"]["name"]}/influence/audio_to_text')
-        safe_mkdirs(f'ablation_study/{C["experiment"]["name"]}/influence/audio_to_visual')
-        safe_mkdirs(f'ablation_study/{C["experiment"]["name"]}/masks') 
-        safe_mkdirs(f'ablation_study/{C["experiment"]["name"]}/preds') 
-        safe_mkdirs(f'ablation_study/{C["experiment"]["name"]}/labels') 
-
-    # Use GloVe features for text inputs
-    for d in train:
-        d["text"] = d["glove"]
-
-    for d in dev:
-        d["text"] = d["glove"]
-
-    for d in test:
-        d["text"] = d["glove"]
-
-    to_tensor = ToTensor(device="cpu")
-    to_tensor_float = ToTensor(device="cpu", dtype=torch.float)
-
-    def create_dataloader(data, shuffle=True, split="train", noise_std=0.05, add_noise=False):
-        d = MOSEI(data, modalities=["text", "glove", "audio", "visual"], select_label=0, split=split, noise_std=noise_std, add_noise=add_noise)
-        d.map(to_tensor_float, "visual", lazy=True)
-        d.map(to_tensor_float, "text", lazy=True)
-        d = d.map(to_tensor_float, "audio", lazy=True)
-        d.apply_transforms()
-        dataloader = DataLoader(
-            d,
-            batch_size=C["dataloaders"]["batch_size"],
-            num_workers=C["dataloaders"]["num_workers"],
-            pin_memory=C["dataloaders"]["batch_size"],
-            shuffle=shuffle,
-            collate_fn=collate_fn,
+    repeat = C["experiment"].get("repeat", 1)
+    all_metrics = []
+    for run_id in range(repeat):
+        print(f"\n=== Run {run_id + 1}/{repeat} ===\n")
+        print("Running with configuration")
+        pprint(C)
+        train, dev, test, vocab = mosei(
+            C["data_dir"],
+            modalities=["text", "glove", "audio", "visual"],
+            remove_pauses=False,
+            max_length=-1,
+            pad_front=True,
+            pad_back=False,
+            aligned=False,
+            cache=os.path.join(C["cache_dir"], "mosei_avt.p"),
         )
 
-        return dataloader
+        if C["model"]["track_masks"]:
+            safe_mkdirs(f'ablation_study/{C["experiment"]["name"]}/inputs/audio')
+            safe_mkdirs(f'ablation_study/{C["experiment"]["name"]}/inputs/text')
+            safe_mkdirs(f'ablation_study/{C["experiment"]["name"]}/inputs/visual')
+            safe_mkdirs(f'ablation_study/{C["experiment"]["name"]}/influence/text_to_audio')
+            safe_mkdirs(f'ablation_study/{C["experiment"]["name"]}/influence/text_to_visual')
+            safe_mkdirs(f'ablation_study/{C["experiment"]["name"]}/influence/visual_to_audio')
+            safe_mkdirs(f'ablation_study/{C["experiment"]["name"]}/influence/visual_to_text')
+            safe_mkdirs(f'ablation_study/{C["experiment"]["name"]}/influence/audio_to_text')
+            safe_mkdirs(f'ablation_study/{C["experiment"]["name"]}/influence/audio_to_visual')
+            safe_mkdirs(f'ablation_study/{C["experiment"]["name"]}/masks') 
+            safe_mkdirs(f'ablation_study/{C["experiment"]["name"]}/preds') 
+            safe_mkdirs(f'ablation_study/{C["experiment"]["name"]}/labels') 
 
-    train_loader = create_dataloader(train, split="train", noise_std=C["experiment"]["noise_std"], add_noise=False)
-    dev_loader = create_dataloader(dev, split="test", noise_std=C["experiment"]["noise_std"], add_noise=C["experiment"]["add_noise_to_val"])
-    test_loader = create_dataloader(test, split="test", noise_std=C["experiment"]["noise_std"], add_noise=C["experiment"]["add_noise_to_test"])
-    print("Running with feedback = {}".format(C["model"]["feedback"]))
-    torch.manual_seed(32)
-    model = AVTClassifier(
-        C["model"]["text_input_size"],
-        C["model"]["audio_input_size"],
-        C["model"]["visual_input_size"],
-        C["model"]["projection_size"],
-        text_layers=C["model"]["text_layers"],
-        audio_layers=C["model"]["audio_layers"],
-        visual_layers=C["model"]["visual_layers"],
-        bidirectional=C["model"]["bidirectional"],
-        dropout=C["model"]["dropout"],
-        encoder_type=C["model"]["encoder_type"],
-        attention=C["model"]["attention"],
-        feedback=C["model"]["feedback"],
-        feedback_type=C["model"]["feedback_type"],
-        device=C["device"],
-        mad_threshold= C["model"]["mad_threshold"],
-        mad_prob=C["model"]["mad_prob"],
-        enable_mad=C["model"]["enable_mad"],
-        track_masks=C["model"]["track_masks"],
-        num_classes=C["num_classes"],
-        memory_augmented_fuser=C["model"]["memory_augmented"]["fuser"],
-        memory_augmented_unimodal=C["model"]["memory_augmented"]["unimodal"],
-        memory_augmented_feedback=C["model"]["memory_augmented"]["feedback"],
-    )
+        # Use GloVe features for text inputs
+        for d in train:
+            d["text"] = d["glove"]
 
-    def count_parameters(model):
-        return sum(p.numel() for p in model.parameters() if p.requires_grad)
+        for d in dev:
+            d["text"] = d["glove"]
 
-    print("NUMBER OF PARAMETERS: {}".format(count_parameters(model)))
+        for d in test:
+            d["text"] = d["glove"]
 
-    model = model.to(C["device"])
-    optimizer = getattr(torch.optim, C["optimizer"]["name"])(
-        [p for p in model.parameters() if p.requires_grad],
-        lr=C["optimizer"]["learning_rate"],
-    )
+        to_tensor = ToTensor(device="cpu")
+        to_tensor_float = ToTensor(device="cpu", dtype=torch.float)
 
-    lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
-        optimizer,
-        "min",
-        factor=0.5,
-        patience=2,
-        cooldown=2,
-        min_lr=C["optimizer"]["learning_rate"] / 20.0,
-    )
+        def create_dataloader(data, shuffle=True, split="train", noise_std=0.05, add_noise=False):
+            d = MOSEI(data, modalities=["text", "glove", "audio", "visual"], select_label=0, split=split, noise_std=noise_std, add_noise=add_noise)
+            d.map(to_tensor_float, "visual", lazy=True)
+            d.map(to_tensor_float, "text", lazy=True)
+            d = d.map(to_tensor_float, "audio", lazy=True)
+            d.apply_transforms()
+            dataloader = DataLoader(
+                d,
+                batch_size=C["dataloaders"]["batch_size"],
+                num_workers=C["dataloaders"]["num_workers"],
+                pin_memory=C["dataloaders"]["batch_size"],
+                shuffle=shuffle,
+                collate_fn=collate_fn,
+            )
 
-    criterion = nn.L1Loss()
+            return dataloader
 
-    def bin_acc_transform(output):
-        y_pred, y = output
-        nz = torch.nonzero(y).squeeze()
-        yp, yt = (y_pred[nz] >= 0).long(), (y[nz] >= 0).long()
-
-        return yp, yt
-
-    def acc_transform(output):
-        y_pred, y = output
-        yp, yt = (y_pred >= 0).long(), (y >= 0).long()
-
-        return yp, yt
-
-    def acc7_transform(output):
-        y_pred, y = output
-        yp = torch.clamp(torch.round(y_pred) + 3, 0, 6).view(-1).long()
-        yt = torch.round(y).view(-1).long() + 3
-        yp = F.one_hot(yp, 7)
-
-        return yp, yt
-
-    def acc5_transform(output):
-        y_pred, y = output
-        yp = torch.clamp(torch.round(y_pred) + 2, 0, 4).view(-1).long()
-        yt = torch.round(y).view(-1).long() + 2
-        yp = F.one_hot(yp, 5)
-
-        return yp, yt
-
-    metrics = {
-        "acc5": Accuracy(output_transform=acc5_transform),
-        "acc7": Accuracy(output_transform=acc7_transform),
-        "bin_accuracy": Accuracy(output_transform=bin_acc_transform),
-        "f1": Fbeta(1, output_transform=bin_acc_transform),
-        "accuracy_zeros": Accuracy(output_transform=acc_transform),
-        "loss": Loss(criterion),
-    }
-
-    if C["overfit_batch"] or C["overfit_batch"] or C["train"]:
-        import shutil
-
-        try:
-            shutil.rmtree(C["trainer"]["checkpoint_dir"])
-        except:
-            pass
-        if C["trainer"]["accumulation_steps"] is not None:
-            acc_steps = C["trainer"]["accumulation_steps"]
-        else:
-            acc_steps = 1
-        trainer = MOSEITrainer(
-            model,
-            optimizer,
-            # score_fn=score_fn,
-            experiment_name=C["experiment"]["name"],
-            checkpoint_dir=C["trainer"]["checkpoint_dir"],
-            metrics=metrics,
-            non_blocking=C["trainer"]["non_blocking"],
-            patience=C["trainer"]["patience"],
-            validate_every=C["trainer"]["validate_every"],
-            retain_graph=C["trainer"]["retain_graph"],
-            loss_fn=criterion,
-            accumulation_steps=acc_steps,
-            lr_scheduler=lr_scheduler,
+        train_loader = create_dataloader(train, split="train", noise_std=C["experiment"]["noise_std"], add_noise=False)
+        dev_loader = create_dataloader(dev, split="test", noise_std=C["experiment"]["noise_std"], add_noise=C["experiment"]["add_noise_to_val"])
+        test_loader = create_dataloader(test, split="test", noise_std=C["experiment"]["noise_std"], add_noise=C["experiment"]["add_noise_to_test"])
+        print("Running with feedback = {}".format(C["model"]["feedback"]))
+        torch.manual_seed(32)
+        model = AVTClassifier(
+            C["model"]["text_input_size"],
+            C["model"]["audio_input_size"],
+            C["model"]["visual_input_size"],
+            C["model"]["projection_size"],
+            text_layers=C["model"]["text_layers"],
+            audio_layers=C["model"]["audio_layers"],
+            visual_layers=C["model"]["visual_layers"],
+            bidirectional=C["model"]["bidirectional"],
+            dropout=C["model"]["dropout"],
+            encoder_type=C["model"]["encoder_type"],
+            attention=C["model"]["attention"],
+            feedback=C["model"]["feedback"],
+            feedback_type=C["model"]["feedback_type"],
             device=C["device"],
-            regularization=C["trainer"]["regularization"],
-            lambda_reg=C["trainer"]["lambda_reg"]
+            mad_threshold= C["model"]["mad_threshold"],
+            mad_prob=C["model"]["mad_prob"],
+            enable_mad=C["model"]["enable_mad"],
+            track_masks=C["model"]["track_masks"],
+            num_classes=C["num_classes"],
+            memory_augmented_fuser=C["model"]["memory_augmented"]["fuser"],
+            memory_augmented_unimodal=C["model"]["memory_augmented"]["unimodal"],
+            memory_augmented_feedback=C["model"]["memory_augmented"]["feedback"],
         )
 
-    if C["debug"]:
-        if C["overfit_batch"]:
-            trainer.overfit_single_batch(train_loader)
-        trainer.fit_debug(train_loader, dev_loader)
-        sys.exit(0)
+        def count_parameters(model):
+            return sum(p.numel() for p in model.parameters() if p.requires_grad)
 
-    if C["train"]:
-        trainer.fit(train_loader, dev_loader, epochs=C["trainer"]["max_epochs"])
+        print("NUMBER OF PARAMETERS: {}".format(count_parameters(model)))
 
-    if C["test"]:
-        try:
-            del trainer
-        except:
-            pass
-        trainer = MOSEITrainer(
-            model,
+        model = model.to(C["device"])
+        optimizer = getattr(torch.optim, C["optimizer"]["name"])(
+            [p for p in model.parameters() if p.requires_grad],
+            lr=C["optimizer"]["learning_rate"],
+        )
+
+        lr_scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             optimizer,
-            experiment_name=C["experiment"]["name"],
-            checkpoint_dir=C["trainer"]["checkpoint_dir"],
-            metrics=metrics,
-            model_checkpoint=C["trainer"]["load_model"],
-            non_blocking=C["trainer"]["non_blocking"],
-            patience=C["trainer"]["patience"],
-            validate_every=C["trainer"]["validate_every"],
-            retain_graph=C["trainer"]["retain_graph"],
-            loss_fn=criterion,
-            device=C["device"],
-            path_to_save=f'ablation_study/{C["experiment"]["name"]}',
+            "min",
+            factor=0.5,
+            patience=2,
+            cooldown=2,
+            min_lr=C["optimizer"]["learning_rate"] / 20.0,
         )
+
+        criterion = nn.L1Loss()
+
+        def bin_acc_transform(output):
+            y_pred, y = output
+            nz = torch.nonzero(y).squeeze()
+            yp, yt = (y_pred[nz] >= 0).long(), (y[nz] >= 0).long()
+
+            return yp, yt
+
+        def acc_transform(output):
+            y_pred, y = output
+            yp, yt = (y_pred >= 0).long(), (y >= 0).long()
+
+            return yp, yt
+
+        def acc7_transform(output):
+            y_pred, y = output
+            yp = torch.clamp(torch.round(y_pred) + 3, 0, 6).view(-1).long()
+            yt = torch.round(y).view(-1).long() + 3
+            yp = F.one_hot(yp, 7)
+
+            return yp, yt
+
+        def acc5_transform(output):
+            y_pred, y = output
+            yp = torch.clamp(torch.round(y_pred) + 2, 0, 4).view(-1).long()
+            yt = torch.round(y).view(-1).long() + 2
+            yp = F.one_hot(yp, 5)
+
+            return yp, yt
+
+        metrics = {
+            "acc5": Accuracy(output_transform=acc5_transform),
+            "acc7": Accuracy(output_transform=acc7_transform),
+            "bin_accuracy": Accuracy(output_transform=bin_acc_transform),
+            "f1": Fbeta(1, output_transform=bin_acc_transform),
+            "accuracy_zeros": Accuracy(output_transform=acc_transform),
+            "loss": Loss(criterion),
+        }
+
+        if C["overfit_batch"] or C["overfit_batch"] or C["train"]:
+            import shutil
+
+            try:
+                # shutil.rmtree(C["trainer"]["checkpoint_dir"])
+                checkpoint_dir = os.path.join(C["trainer"]["checkpoint_dir"], f"run_{run_id}")
+                C["trainer"]["checkpoint_dir"] = checkpoint_dir
+                shutil.rmtree(checkpoint_dir)
+            except:
+                pass
+            if C["trainer"]["accumulation_steps"] is not None:
+                acc_steps = C["trainer"]["accumulation_steps"]
+            else:
+                acc_steps = 1
+            trainer = MOSEITrainer(
+                model,
+                optimizer,
+                # score_fn=score_fn,
+                experiment_name=C["experiment"]["name"],
+                checkpoint_dir=C["trainer"]["checkpoint_dir"],
+                metrics=metrics,
+                non_blocking=C["trainer"]["non_blocking"],
+                patience=C["trainer"]["patience"],
+                validate_every=C["trainer"]["validate_every"],
+                retain_graph=C["trainer"]["retain_graph"],
+                loss_fn=criterion,
+                accumulation_steps=acc_steps,
+                lr_scheduler=lr_scheduler,
+                device=C["device"],
+                regularization=C["trainer"]["regularization"],
+                lambda_reg=C["trainer"]["lambda_reg"]
+            )
+
+        if C["debug"]:
+            if C["overfit_batch"]:
+                trainer.overfit_single_batch(train_loader)
+            trainer.fit_debug(train_loader, dev_loader)
+            sys.exit(0)
+
+        if C["train"]:
+            trainer.fit(train_loader, dev_loader, epochs=C["trainer"]["max_epochs"])
+
+        if C["test"]:
+            try:
+                del trainer
+            except:
+                pass
+            trainer = MOSEITrainer(
+                model,
+                optimizer,
+                experiment_name=C["experiment"]["name"],
+                checkpoint_dir=C["trainer"]["checkpoint_dir"],
+                metrics=metrics,
+                model_checkpoint=C["trainer"]["load_model"],
+                non_blocking=C["trainer"]["non_blocking"],
+                patience=C["trainer"]["patience"],
+                validate_every=C["trainer"]["validate_every"],
+                retain_graph=C["trainer"]["retain_graph"],
+                loss_fn=criterion,
+                device=C["device"],
+                path_to_save=f'ablation_study/{C["experiment"]["name"]}',
+            )
         
-        predictions, targets = trainer.predict(test_loader, track_masks=C["model"]["track_masks"])
+            predictions, targets = trainer.predict(test_loader, track_masks=C["model"]["track_masks"])
 
-        pred = torch.cat(predictions)
-        y_test = torch.cat(targets)
+            pred = torch.cat(predictions)
+            y_test = torch.cat(targets)
 
-        import uuid
+            import uuid
 
-        from mmlatch.mosei_metrics import (eval_mosei_senti, print_metrics,
-                                           save_metrics)
+            from mmlatch.mosei_metrics import (eval_mosei_senti, print_metrics,
+                                               save_metrics)
 
-        metrics = eval_mosei_senti(pred, y_test, True)
-        print_metrics(metrics)
+            metrics = eval_mosei_senti(pred, y_test, True)
+            print_metrics(metrics)
 
-        if C["experiment"]["add_noise_to_test"]:
-            header = f'\n{C["experiment"]["name"]} (std: {C["experiment"]["noise_std"]}) lambda={C["trainer"]["lambda_reg"]}\n\n'
-        elif C["experiment"]["drop_modality_test"]:
-            header = f'\n{C["experiment"]["name"]} (drop prob: {C["experiment"]["drop_modality_prob"]}) lambda={C["trainer"]["lambda_reg"]}\n\n'
-        else:
-            header = f'\n{C["experiment"]["name"]} (baseline) lambda={C["trainer"]["lambda_reg"]}\n\n'
-        with open("experiment_logging.txt", "a") as f:
-            f.write(header)
-            for k, v in metrics.items():
-                line = "{}:\t{}\n".format(k, v)
-                f.write(line)
+            if C["experiment"]["add_noise_to_test"]:
+                header = f'\n{C["experiment"]["name"]} (std: {C["experiment"]["noise_std"]}) lambda={C["trainer"]["lambda_reg"]}\n\n'
+            elif C["experiment"]["drop_modality_test"]:
+                header = f'\n{C["experiment"]["name"]} (drop prob: {C["experiment"]["drop_modality_prob"]}) lambda={C["trainer"]["lambda_reg"]}\n\n'
+            else:
+                header = f'\n{C["experiment"]["name"]} (baseline) lambda={C["trainer"]["lambda_reg"]}\n\n'
+            with open("experiment_logging.txt", "a") as f:
+                f.write(header)
+                for k, v in metrics.items():
+                    line = "{}:\t{}\n".format(k, v)
+                    f.write(line)
 
-        results_dir = C["results_dir"]
-        safe_mkdirs(results_dir)
-        fname = uuid.uuid1().hex
-        results_file = os.path.join(results_dir, fname)
+            results_dir = C["results_dir"]
+            safe_mkdirs(results_dir)
+            fname = uuid.uuid1().hex
+            results_file = os.path.join(results_dir, f"run_{run_id}_{fname}.json")
 
-        save_metrics(metrics, results_file)
+            save_metrics(metrics, results_file)
+
+            all_metrics.append(metrics)
+
+            torch.cuda.empty_cache()
+            gc.collect()
+
+    avg, best = average_and_best_metrics(all_metrics, key="f1", mode="max")
+    print("\n=== Averaged Metrics Across Runs ===")
+    print_metrics(avg)
+    print("=== Best Metrics Across Runs ===")
+    print_metrics(best)
