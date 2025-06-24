@@ -303,8 +303,8 @@ if __name__ == "__main__":
             torch.cuda.empty_cache()
             gc.collect()
 
-    avg, best = average_and_best_metrics(all_metrics)
-    print("=== Averaged Metrics ===")
+    avg, best = average_and_best_metrics(all_metrics, key="f1", mode="max")
+    print("\n=== Averaged Metrics Across Runs ===")
     print_metrics(avg)
-    print("=== Best Metrics ===")
+    print("=== Best Metrics Across Runs ===")
     print_metrics(best)
