@@ -75,6 +75,9 @@ def get_parser():
     parser.add_argument("--mann-unimodal", dest="model.memory_augmented.unimodal", action="store_true")
     parser.add_argument("--mann-feedback", dest="model.memory_augmented.feedback", action="store_true")
 
+    parser.add_argument("--repeat", dest="experiment.repeat", type=int, default=1,
+                        help="Number of experiment repetitions")
+
     return parser
 
 
