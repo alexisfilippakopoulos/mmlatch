@@ -42,7 +42,7 @@ model:
   track_masks: True
 
 experiment:
-  name: l1_reg
+  name: mann_l1_reg
   description: MOSEI sentiment task
   repeat: 5
   # add gaussian noise with mean 0 and some std
@@ -66,7 +66,7 @@ trainer:
   patience: 10
   max_epochs: 100
   retain_graph: True
-  load_model: l1_reg.best.pth
+  load_model: mann_l1_reg.best.pth
   checkpoint_dir: checkpoints
   # can be l1, l2 or None
   regularization: l1
