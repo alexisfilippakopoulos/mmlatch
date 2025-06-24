@@ -16,6 +16,10 @@ class FeedbackUnit(nn.Module):
         dropout=0.1,
         device="cpu",
         memory_augmented=False,
+        mad_threshold=0.3,
+        mad_prob=0.5,
+        enable_mad=False,
+        track_masks=False
     ):
         super(FeedbackUnit, self).__init__()
         if memory_augmented:
@@ -24,9 +28,18 @@ class FeedbackUnit(nn.Module):
         self.mask_type = mask_type
         self.mod1_sz = mod1_sz
         self.hidden_dim = hidden_dim
+        self.device = device
+        self.batch_counter = 0
+
+        self.mad_threshold = mad_threshold
+        self.mad_prob = mad_prob
+        self.enable_mad = enable_mad
+        self.track_opt = track_masks
 
         if mask_type == "learnable_sequence_mask":
+            torch.manual_seed(32)
             self.mask1 = RNN(hidden_dim, mod1_sz, dropout=dropout, device=device, memory_augmented=memory_augmented)
+            torch.manual_seed(32)
             self.mask2 = RNN(hidden_dim, mod1_sz, dropout=dropout, device=device, memory_augmented=memory_augmented)
         else:
             self.mask1 = nn.Linear(hidden_dim, mod1_sz)
@@ -38,32 +51,71 @@ class FeedbackUnit(nn.Module):
         }
 
         self.get_mask = mask_fn[self.mask_type]
+        print(f"Modality-Aware Dropout: {enable_mad}, thr={mad_threshold}, p={mad_prob}")
 
-    def _learnable_sequence_mask(self, y, z, lengths=None):
+    def _learnable_sequence_mask(self, y, z, lengths=None, track_masks=False, return_masks=False):
         oy, _, _ = self.mask1(y, lengths)
         oz, _, _ = self.mask2(z, lengths)
-
         lg = (torch.sigmoid(oy) + torch.sigmoid(oz)) * 0.5
-
-        mask = lg
-
-        return mask
+        if (self.track_opt and track_masks) or (return_masks):
+            return torch.sigmoid(oy), torch.sigmoid(oz), lg
+        return lg
 
     def _learnable_static_mask(self, y, z, lengths=None):
         y = self.mask1(y)
         z = self.mask2(z)
-        mask1 = torch.sigmoid(y)
-        mask2 = torch.sigmoid(z)
-        mask = (mask1 + mask2) * 0.5
-
+        mask = (torch.sigmoid(y) + torch.sigmoid(z)) * 0.5
         return mask
 
-    def forward(self, x, y, z, lengths=None):
-        mask = self.get_mask(y, z, lengths=lengths)
-        mask = F.dropout(mask, p=0.2)
-        x_new = x * mask
+    def apply_mad(self, x, mask):
+        # x: [B, L, D], mask: [B, L, D]
+        if not self.enable_mad:
+            return x
 
-        return x_new
+        B = x.shape[0]
+        device = x.device
+        # shape: (B,)
+        mask_mean = mask.mean(dim=[1, 2])  
+
+        # dropout decision: 1 = keep, 0 = drop
+        keep_mask = torch.ones(B, device=device)
+
+        for i in range(B):
+            if mask_mean[i] < self.mad_threshold:
+                if torch.rand(1, device=device).item() < self.mad_prob:
+                    keep_mask[i] = 0.0
+        # broadcast to [B, 1, 1]
+        keep_mask = keep_mask.view(B, 1, 1)  
+        return x * keep_mask  
+
+    def forward(self, x, y, z, lengths=None, track_masks=False, path_to_save=None, modal=None, return_masks=False):
+        if self.track_opt and track_masks:
+            self.batch_counter += 1
+            mask, f_y, f_z = self.get_mask(y, z, lengths=lengths, track_masks=True)
+            torch.save(mask, f"{path_to_save}/masks/mask_{modal}_batch_{self.batch_counter}.pt")
+            if modal == "text":
+                torch.save(f_y, f"{path_to_save}/influence/audio_to_{modal}/batch_{self.batch_counter}.pt")
+                torch.save(f_z, f"{path_to_save}/influence/visual_to_{modal}/batch_{self.batch_counter}.pt")
+            elif modal == "audio":
+                torch.save(f_y, f"{path_to_save}/influence/text_to_{modal}/batch_{self.batch_counter}.pt")
+                torch.save(f_z, f"{path_to_save}/influence/visual_to_{modal}/batch_{self.batch_counter}.pt")
+            else:
+                torch.save(f_y, f"{path_to_save}/influence/text_to_{modal}/batch_{self.batch_counter}.pt")
+                torch.save(f_z, f"{path_to_save}/influence/audio_to_{modal}/batch_{self.batch_counter}.pt")
+        else:
+            if return_masks:
+                mask, f_y, f_z = self.get_mask(y, z, lengths=lengths, return_masks=True)
+            else:
+                mask = self.get_mask(y, z, lengths=lengths)
+        #x = self.apply_mad(x, mask)
+        mask = F.dropout(mask, p=0.2)
+        x_new = x * mask 
+        if return_masks:
+            return x_new, f_y, f_z
+            #return x_new
+        else: 
+            return x_new
+
 
 
 class Feedback(nn.Module):
@@ -77,8 +129,13 @@ class Feedback(nn.Module):
         dropout=0.1,
         device="cpu",
         memory_augmented=False,
+        mad_threshold=0.3,
+        mad_prob=0.5,
+        enable_mad=False,
+        track_masks=False
     ):
         super(Feedback, self).__init__()
+        torch.manual_seed(32)
         self.f1 = FeedbackUnit(
             hidden_dim,
             mod1_sz,
@@ -86,7 +143,12 @@ class Feedback(nn.Module):
             dropout=dropout,
             device=device,
             memory_augmented=memory_augmented,
+            mad_threshold=mad_threshold,
+            mad_prob=mad_prob,
+            enable_mad=enable_mad,
+            track_masks=track_masks
         )
+        torch.manual_seed(32)
         self.f2 = FeedbackUnit(
             hidden_dim,
             mod2_sz,
@@ -94,7 +156,12 @@ class Feedback(nn.Module):
             dropout=dropout,
             device=device,
             memory_augmented=memory_augmented,
+            mad_threshold=mad_threshold,
+            mad_prob=mad_prob,
+            enable_mad=enable_mad,
+            track_masks=track_masks
         )
+        torch.manual_seed(32)
         self.f3 = FeedbackUnit(
             hidden_dim,
             mod3_sz,
@@ -102,14 +169,23 @@ class Feedback(nn.Module):
             dropout=dropout,
             device=device,
             memory_augmented=memory_augmented,
+            mad_threshold=mad_threshold,
+            mad_prob=mad_prob,
+            enable_mad=enable_mad,
+            track_masks=track_masks
         )
 
-    def forward(self, low_x, low_y, low_z, hi_x, hi_y, hi_z, lengths=None):
-        x = self.f1(low_x, hi_y, hi_z, lengths=lengths)
-        y = self.f2(low_y, hi_x, hi_z, lengths=lengths)
-        z = self.f3(low_z, hi_x, hi_y, lengths=lengths)
-
-        return x, y, z
+    def forward(self, low_x, low_y, low_z, hi_x, hi_y, hi_z, lengths=None, track_masks=False, path_to_save=None, return_masks=False):
+        if return_masks:
+            x, au_to_txt, vis_to_txt = self.f1(low_x, hi_y, hi_z, lengths=lengths, track_masks=track_masks, path_to_save=path_to_save, modal="text", return_masks=return_masks)
+            y, txt_to_au, vis_to_au = self.f2(low_y, hi_x, hi_z, lengths=lengths, track_masks=track_masks, path_to_save=path_to_save, modal="audio", return_masks=return_masks)
+            z, txt_to_vis, au_to_vis = self.f3(low_z, hi_x, hi_y, lengths=lengths, track_masks=track_masks, path_to_save=path_to_save, modal="visual", return_masks=return_masks)
+            return x, y, z, au_to_txt, vis_to_txt, txt_to_au, vis_to_au, txt_to_vis, au_to_vis
+        else:
+            x = self.f1(low_x, hi_y, hi_z, lengths=lengths, track_masks=track_masks, path_to_save=path_to_save, modal="text", return_masks=return_masks)
+            y = self.f2(low_y, hi_x, hi_z, lengths=lengths, track_masks=track_masks, path_to_save=path_to_save, modal="audio", return_masks=return_masks)
+            z = self.f3(low_z, hi_x, hi_y, lengths=lengths, track_masks=track_masks, path_to_save=path_to_save, modal="visual", return_masks=return_masks)
+            return x, y, z
 
 
 class AttentionFuser(nn.Module):
@@ -172,11 +248,13 @@ class AttRnnFuser(nn.Module):
         if memory_augmented:
             print_emphatically("We are using a MANN as the final fuser.")
 
+        torch.manual_seed(32)
         self.att_fuser = AttentionFuser(
             proj_sz=proj_sz,
             return_hidden=True,
             device=device,
         )
+        torch.manual_seed(32)
         self.rnn = AttentiveRNN(
             self.att_fuser.out_size,
             proj_sz,
@@ -392,6 +470,7 @@ class UnimodalEncoder(nn.Module):
         if memory_augmented:
             print_emphatically("Using MANN as UnimodalEncoder")
 
+        torch.manual_seed(32)
         self.encoder = AttentiveRNN(
             input_size,
             projection_size,
@@ -433,10 +512,14 @@ class AVTEncoder(nn.Module):
         memory_augmented_fuser=False,
         memory_augmented_unimodal=False,
         memory_augmented_feedback=False,
+        mad_threshold=0.3,
+        mad_prob=0.5,
+        enable_mad=False,
+        track_masks=False
     ):
         super(AVTEncoder, self).__init__()
         self.feedback = feedback
-
+        torch.manual_seed(32)
         self.text = UnimodalEncoder(
             text_input_size,
             projection_size,
@@ -449,7 +532,7 @@ class AVTEncoder(nn.Module):
             device=device,
             memory_augmented=memory_augmented_unimodal
         )
-
+        torch.manual_seed(32)
         self.audio = UnimodalEncoder(
             audio_input_size,
             projection_size,
@@ -462,7 +545,7 @@ class AVTEncoder(nn.Module):
             device=device,
             memory_augmented=memory_augmented_unimodal
         )
-
+        torch.manual_seed(32)
         self.visual = UnimodalEncoder(
             visual_input_size,
             projection_size,
@@ -475,7 +558,7 @@ class AVTEncoder(nn.Module):
             device=device,
             memory_augmented=memory_augmented_unimodal
         )
-
+        torch.manual_seed(32)
         self.fuser = AttRnnFuser(
             proj_sz=projection_size,
             device=device,
@@ -485,6 +568,7 @@ class AVTEncoder(nn.Module):
         self.out_size = self.fuser.out_size
 
         if feedback:
+            torch.manual_seed(32)
             self.fm = Feedback(
                 projection_size,
                 text_input_size,
@@ -494,6 +578,10 @@ class AVTEncoder(nn.Module):
                 dropout=0.1,
                 device=device,
                 memory_augmented=memory_augmented_feedback,
+                mad_threshold=mad_threshold,
+                mad_prob=mad_prob,
+                enable_mad=enable_mad,
+                track_masks=track_masks
             )
 
     def _encode(self, txt, au, vi, lengths):
@@ -508,15 +596,21 @@ class AVTEncoder(nn.Module):
 
         return fused
 
-    def forward(self, txt, au, vi, lengths):
+    def forward(self, txt, au, vi, lengths, track_masks=False, path_to_save=None, return_masks=False):
         if self.feedback:
             txt1, au1, vi1 = self._encode(txt, au, vi, lengths)
-            txt, au, vi = self.fm(txt, au, vi, txt1, au1, vi1, lengths=lengths)
+            if return_masks:
+                txt, au, vi, au_to_txt, vis_to_txt, txt_to_au, vis_to_au, txt_to_vis, au_to_vis = self.fm(txt, au, vi, txt1, au1, vi1, lengths=lengths, track_masks=track_masks, path_to_save=path_to_save, return_masks=return_masks)
+            else:
+                txt, au, vi = self.fm(txt, au, vi, txt1, au1, vi1, lengths=lengths, track_masks=track_masks, path_to_save=path_to_save)
 
         txt, au, vi = self._encode(txt, au, vi, lengths)
         fused = self._fuse(txt, au, vi, lengths)
 
-        return fused
+        if return_masks:
+            return fused, au_to_txt, vis_to_txt, txt_to_au, vis_to_au, txt_to_vis, au_to_vis
+        else:
+            return fused
 
 
 class AVTClassifier(nn.Module):
@@ -536,13 +630,17 @@ class AVTClassifier(nn.Module):
         feedback=False,
         feedback_type="learnable_sequence_mask",
         device="cpu",
+        mad_threshold=0.3,
+        mad_prob=0.5,
+        enable_mad=False,
+        track_masks=False,
         num_classes=1,
         memory_augmented_fuser=False,
         memory_augmented_unimodal=False,
         memory_augmented_feedback=False
     ):
         super(AVTClassifier, self).__init__()
-
+        torch.manual_seed(32)
         self.encoder = AVTEncoder(
             text_input_size,
             audio_input_size,
@@ -561,13 +659,24 @@ class AVTClassifier(nn.Module):
             memory_augmented_fuser=memory_augmented_fuser,
             memory_augmented_unimodal=memory_augmented_unimodal,
             memory_augmented_feedback=memory_augmented_feedback,
+            mad_threshold=mad_threshold,
+            mad_prob=mad_prob,
+            enable_mad=enable_mad,
+            track_masks=track_masks
         )
 
         self.classifier = nn.Linear(self.encoder.out_size, num_classes)
 
-    def forward(self, inputs):
-        out = self.encoder(
-            inputs["text"], inputs["audio"], inputs["visual"], inputs["lengths"]
-        )
+    def forward(self, inputs, track_masks=False, path_to_save=None, return_masks=False):
+        if return_masks:
+            out, au_to_txt, vis_to_txt, txt_to_au, vis_to_au, txt_to_vis, au_to_vis = self.encoder(
+                inputs["text"], inputs["audio"], inputs["visual"], inputs["lengths"], track_masks=track_masks, path_to_save=path_to_save, return_masks=return_masks
+            )
 
-        return self.classifier(out)
+            return self.classifier(out), au_to_txt, vis_to_txt, txt_to_au, vis_to_au, txt_to_vis, au_to_vis
+        else:
+            out = self.encoder(
+                inputs["text"], inputs["audio"], inputs["visual"], inputs["lengths"], track_masks=track_masks, path_to_save=path_to_save, return_masks=return_masks
+            )
+
+            return self.classifier(out)

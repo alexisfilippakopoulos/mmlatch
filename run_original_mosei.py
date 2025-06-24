@@ -96,6 +96,20 @@ if __name__ == "__main__":
         cache=os.path.join(C["cache_dir"], "mosei_avt.p"),
     )
 
+    if C["model"]["track_masks"]:
+        safe_mkdirs(f'ablation_study/{C["experiment"]["name"]}/inputs/audio')
+        safe_mkdirs(f'ablation_study/{C["experiment"]["name"]}/inputs/text')
+        safe_mkdirs(f'ablation_study/{C["experiment"]["name"]}/inputs/visual')
+        safe_mkdirs(f'ablation_study/{C["experiment"]["name"]}/influence/text_to_audio')
+        safe_mkdirs(f'ablation_study/{C["experiment"]["name"]}/influence/text_to_visual')
+        safe_mkdirs(f'ablation_study/{C["experiment"]["name"]}/influence/visual_to_audio')
+        safe_mkdirs(f'ablation_study/{C["experiment"]["name"]}/influence/visual_to_text')
+        safe_mkdirs(f'ablation_study/{C["experiment"]["name"]}/influence/audio_to_text')
+        safe_mkdirs(f'ablation_study/{C["experiment"]["name"]}/influence/audio_to_visual')
+        safe_mkdirs(f'ablation_study/{C["experiment"]["name"]}/masks') 
+        safe_mkdirs(f'ablation_study/{C["experiment"]["name"]}/preds') 
+        safe_mkdirs(f'ablation_study/{C["experiment"]["name"]}/labels') 
+
     # Use GloVe features for text inputs
     for d in train:
         d["text"] = d["glove"]
@@ -109,8 +123,8 @@ if __name__ == "__main__":
     to_tensor = ToTensor(device="cpu")
     to_tensor_float = ToTensor(device="cpu", dtype=torch.float)
 
-    def create_dataloader(data, shuffle=True):
-        d = MOSEI(data, modalities=["text", "glove", "audio", "visual"], select_label=0)
+    def create_dataloader(data, shuffle=True, split="train", noise_std=0.05, add_noise=False):
+        d = MOSEI(data, modalities=["text", "glove", "audio", "visual"], select_label=0, split=split, noise_std=noise_std, add_noise=add_noise)
         d.map(to_tensor_float, "visual", lazy=True)
         d.map(to_tensor_float, "text", lazy=True)
         d = d.map(to_tensor_float, "audio", lazy=True)
@@ -126,11 +140,11 @@ if __name__ == "__main__":
 
         return dataloader
 
-    train_loader = create_dataloader(train)
-    dev_loader = create_dataloader(dev)
-    test_loader = create_dataloader(test)
+    train_loader = create_dataloader(train, split="train", noise_std=C["experiment"]["noise_std"], add_noise=False)
+    dev_loader = create_dataloader(dev, split="test", noise_std=C["experiment"]["noise_std"], add_noise=C["experiment"]["add_noise_to_val"])
+    test_loader = create_dataloader(test, split="test", noise_std=C["experiment"]["noise_std"], add_noise=C["experiment"]["add_noise_to_test"])
     print("Running with feedback = {}".format(C["model"]["feedback"]))
-
+    torch.manual_seed(32)
     model = AVTClassifier(
         C["model"]["text_input_size"],
         C["model"]["audio_input_size"],
@@ -146,6 +160,10 @@ if __name__ == "__main__":
         feedback=C["model"]["feedback"],
         feedback_type=C["model"]["feedback_type"],
         device=C["device"],
+        mad_threshold= C["model"]["mad_threshold"],
+        mad_prob=C["model"]["mad_prob"],
+        enable_mad=C["model"]["enable_mad"],
+        track_masks=C["model"]["track_masks"],
         num_classes=C["num_classes"],
         memory_augmented_fuser=C["model"]["memory_augmented"]["fuser"],
         memory_augmented_unimodal=C["model"]["memory_augmented"]["unimodal"],
@@ -238,6 +256,8 @@ if __name__ == "__main__":
             accumulation_steps=acc_steps,
             lr_scheduler=lr_scheduler,
             device=C["device"],
+            regularization=C["trainer"]["regularization"],
+            lambda_reg=C["trainer"]["lambda_reg"]
         )
 
     if C["debug"]:
@@ -267,9 +287,10 @@ if __name__ == "__main__":
             retain_graph=C["trainer"]["retain_graph"],
             loss_fn=criterion,
             device=C["device"],
+            path_to_save=f'ablation_study/{C["experiment"]["name"]}',
         )
-
-        predictions, targets = trainer.predict(test_loader)
+        
+        predictions, targets = trainer.predict(test_loader, track_masks=C["model"]["track_masks"])
 
         pred = torch.cat(predictions)
         y_test = torch.cat(targets)
@@ -281,6 +302,18 @@ if __name__ == "__main__":
 
         metrics = eval_mosei_senti(pred, y_test, True)
         print_metrics(metrics)
+
+        if C["experiment"]["add_noise_to_test"]:
+            header = f'\n{C["experiment"]["name"]} (std: {C["experiment"]["noise_std"]}) lambda={C["trainer"]["lambda_reg"]}\n\n'
+        elif C["experiment"]["drop_modality_test"]:
+            header = f'\n{C["experiment"]["name"]} (drop prob: {C["experiment"]["drop_modality_prob"]}) lambda={C["trainer"]["lambda_reg"]}\n\n'
+        else:
+            header = f'\n{C["experiment"]["name"]} (baseline) lambda={C["trainer"]["lambda_reg"]}\n\n'
+        with open("experiment_logging.txt", "a") as f:
+            f.write(header)
+            for k, v in metrics.items():
+                line = "{}:\t{}\n".format(k, v)
+                f.write(line)
 
         results_dir = C["results_dir"]
         safe_mkdirs(results_dir)

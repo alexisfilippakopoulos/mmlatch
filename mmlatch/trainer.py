@@ -38,6 +38,9 @@ class Trainer(object):
         retain_graph: bool = False,
         dtype: torch.dtype = torch.float,
         device: str = "cpu",
+        regularization=None,
+        path_to_save=None,
+        lambda_reg=0,
     ) -> None:
         self.dtype = dtype
         self.retain_graph = retain_graph
@@ -48,7 +51,9 @@ class Trainer(object):
         self.patience = patience
         self.accumulation_steps = accumulation_steps
         self.checkpoint_dir = checkpoint_dir
-
+        self.path_to_save = path_to_save
+        self.regularization = regularization
+        self.lambda_reg = lambda_reg
         model_checkpoint = self._check_checkpoint(model_checkpoint)
         optimizer_checkpoint = self._check_checkpoint(optimizer_checkpoint)
 
@@ -145,23 +150,46 @@ class Trainer(object):
         return inputs, targets
 
     def get_predictions_and_targets(
-        self: TrainerType, batch: List[torch.Tensor]
+        self: TrainerType, batch: List[torch.Tensor], track_masks=False
     ) -> Tuple[torch.Tensor, ...]:
         inputs, targets = self.parse_batch(batch)
-        y_pred = self.model(inputs)
+        print(inputs.__class__)
+        y_pred = self.model(inputs, track_masks, self.path_to_save)
 
         return y_pred, targets
 
     def train_step(
         self: TrainerType, engine: Engine, batch: List[torch.Tensor]
     ) -> float:
-        self.model.train()
-        y_pred, targets = self.get_predictions_and_targets(batch)
-        loss = self.loss_fn(y_pred, targets)  # type: ignore
-
-        loss = loss / self.accumulation_steps
+        self.model.train()   
+        if self.regularization == "l1":
+            y_pred, targets, au_to_txt, vis_to_txt, txt_to_au, vis_to_au, txt_to_vis, au_to_vis = self.get_predictions_and_targets(batch, return_masks=True)
+            loss = self.loss_fn(y_pred, targets)  # type: ignore
+            l1_reg = (torch.sum(torch.abs(au_to_txt)) + 
+                    torch.sum(torch.abs(vis_to_txt)) + 
+                    torch.sum(torch.abs(txt_to_au)) + 
+                    torch.sum(torch.abs(vis_to_au)) +
+                    torch.sum(torch.abs(txt_to_vis)) + 
+                    torch.sum(torch.abs(au_to_vis)))
+            loss = loss + (self.lambda_reg / self.accumulation_steps) * l1_reg
+            loss = loss / self.accumulation_steps 
+        elif self.regularization == "l2":
+            y_pred, targets, au_to_txt, vis_to_txt, txt_to_au, vis_to_au, txt_to_vis, au_to_vis = self.get_predictions_and_targets(batch, return_masks=True)
+            loss = self.loss_fn(y_pred, targets)  # type: ignore
+            l2_reg = (torch.sum(au_to_txt ** 2) + 
+                    torch.sum(vis_to_txt ** 2) + 
+                    torch.sum(txt_to_au ** 2) + 
+                    torch.sum(vis_to_au ** 2) +
+                    torch.sum(txt_to_vis ** 2) + 
+                    torch.sum(au_to_vis ** 2))            
+            loss = loss + (self.lambda_reg / self.accumulation_steps) * l2_reg
+            loss = loss / self.accumulation_steps
+        else:
+            y_pred, targets = self.get_predictions_and_targets(batch, return_masks=False)
+            loss = self.loss_fn(y_pred, targets)  # type: ignore
+            loss = loss / self.accumulation_steps
+        
         loss.backward(retain_graph=self.retain_graph)
-
         if self.lr_scheduler is not None:
             if (engine.state.iteration - 1) % 128 == 0:
                 print("LR = {}".format(self.optimizer.param_groups[0]["lr"]))
@@ -183,15 +211,22 @@ class Trainer(object):
 
             return y_pred, targets
 
-    def predict(self: TrainerType, dataloader: DataLoader) -> State:
+    def predict(self: TrainerType, dataloader: DataLoader, track_masks=False) -> State:
         predictions, targets = [], []
 
-        for batch in dataloader:
+        for idx, batch in enumerate(dataloader):
             self.model.eval()
             with torch.no_grad():
-                pred, targ = self.get_predictions_and_targets(batch)
+                pred, targ = self.get_predictions_and_targets(batch, track_masks)
                 predictions.append(pred)
                 targets.append(targ)
+                if track_masks:
+                    torch.save(pred.cpu(), f"{self.path_to_save}/preds/batch_{idx + 1}.pt")
+                    torch.save(targ.cpu(), f"{self.path_to_save}/labels/batch_{idx + 1}.pt")
+                    inputs, _ = self.parse_batch(batch)
+                    torch.save(inputs["text"].cpu(), f"{self.path_to_save}/inputs/text/batch_{idx + 1}.pt")
+                    torch.save(inputs["visual"].cpu(), f"{self.path_to_save}/inputs/visual/batch_{idx + 1}.pt")
+                    torch.save(inputs["audio"].cpu(), f"{self.path_to_save}/inputs/audio/batch_{idx + 1}.pt")
 
         return predictions, targets
 
@@ -290,11 +325,16 @@ class MOSEITrainer(Trainer):
         return inputs, targets
 
     def get_predictions_and_targets(
-        self, batch: List[torch.Tensor]
+        self, batch: List[torch.Tensor], track_masks=False, return_masks=False
     ) -> Tuple[torch.Tensor, ...]:
         inputs, targets = self.parse_batch(batch)
-        y_pred = self.model(inputs)
+        if return_masks:
+            y_pred, au_to_txt, vis_to_txt, txt_to_au, vis_to_au, txt_to_vis, au_to_vis = self.model(inputs, track_masks, self.path_to_save, return_masks)
+        else:
+            y_pred = self.model(inputs, track_masks, self.path_to_save, return_masks)
         y_pred = y_pred.squeeze()
         targets = targets.squeeze()
-
-        return y_pred, targets
+        if return_masks:
+            return y_pred, targets, au_to_txt, vis_to_txt, txt_to_au, vis_to_au, txt_to_vis, au_to_vis
+        else:
+            return y_pred, targets

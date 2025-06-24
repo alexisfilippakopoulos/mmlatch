@@ -1,4 +1,4 @@
-data_dir: CMU-MOSEI
+data_dir: CMU-MOSI
 results_dir: our_results
 train: true
 test: true
@@ -31,10 +31,6 @@ model:
   noise_percentage_train: 0.2
   augment_train_data: false
   noise_percentage_test: 0.2
-  memory_augmented:
-    fuser: true
-    unimodal: false
-    feedback: false
   enable_mad: False
   mad_prob: 0.6
   mad_threshold: 0.35
@@ -42,12 +38,12 @@ model:
   track_masks: True
 
 experiment:
-  name: l1_reg
+  name: l1
   description: MOSEI sentiment task
   # add gaussian noise with mean 0 and some std
-  add_noise_to_test: False
-  add_noise_to_val: False
-  noise_std: 0.1
+  add_noise_to_test: True
+  add_noise_to_val: True
+  noise_std: 0.3
   # randomly drop each modality with a prob p
   drop_modality_test: False
   drop_modality_prob: 0.3
@@ -65,8 +61,9 @@ trainer:
   patience: 10
   max_epochs: 100
   retain_graph: True
-  load_model: l1_reg.best.pth
+  # base_checkpoint.best.pth or l1_checkpoint.best.pth
+  load_model: l1_checkpoint.best.pth
   checkpoint_dir: checkpoints
   # can be l1, l2 or None
   regularization: l1
-  lambda_reg: 0.0000001
+  lambda_reg: 0.0001

@@ -1,2 +1,5 @@
 CMU-MultimodalSDK/
 our_results/
+checkpoints/
+mmlatch/__pycache__/
+ablation_study/
