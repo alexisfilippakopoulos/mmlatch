@@ -3,6 +3,7 @@ import os
 import sys
 from pprint import pprint
 import gc
+import wandb
 
 import torch
 import torch.nn as nn
@@ -82,6 +83,14 @@ def get_parser():
 
 
 C = load_config(parser=get_parser())
+
+wandb.init(
+    entity="slp-deprived",
+    project="mmlatch",
+    name=C["experiment"]["name"],
+    config=C,
+    dir=C["results_dir"],
+)
 
 collate_fn = MOSEICollator(
     device="cpu", modalities=["text", "audio", "visual"], max_length=-1
@@ -280,6 +289,7 @@ if __name__ == "__main__":
 
         if C["train"]:
             trainer.fit(train_loader, dev_loader, epochs=C["trainer"]["max_epochs"])
+            wandb.save(os.path.join(C["trainer"]["checkpoint_dir"], "*"))
 
         if C["test"]:
             try:
@@ -315,6 +325,8 @@ if __name__ == "__main__":
             metrics = eval_mosei_senti(pred, y_test, True)
             print_metrics(metrics)
 
+            wandb.log({f"test/{k}": v for k, v in metrics.items()})
+
             if C["experiment"]["add_noise_to_test"]:
                 header = f'\n{C["experiment"]["name"]} (std: {C["experiment"]["noise_std"]}) lambda={C["trainer"]["lambda_reg"]}\n\n'
             elif C["experiment"]["drop_modality_test"]:
@@ -338,6 +350,8 @@ if __name__ == "__main__":
 
             torch.cuda.empty_cache()
             gc.collect()
+
+    wandb.finish()
 
     avg, best = average_and_best_metrics(all_metrics, key="f1", mode="max")
     print("\n=== Averaged Metrics Across Runs ===")
