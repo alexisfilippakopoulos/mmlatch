@@ -16,7 +16,7 @@ from mmlatch.data import MOSEI, MOSEICollator, ToTensor
 from mmlatch.mm import AudioVisualTextClassifier, AVTClassifier
 from mmlatch.trainer import MOSEITrainer
 from mmlatch.util import safe_mkdirs
-from mmlatch.mosei_metrics import average_metrics
+from mmlatch.mosei_metrics import average_and_best_metrics
 
 
 class BCE(nn.Module):
@@ -303,7 +303,8 @@ if __name__ == "__main__":
             torch.cuda.empty_cache()
             gc.collect()
 
-    print("\n=== Averaged Metrics Across Runs ===")
-    avg = average_metrics(all_metrics)
+    avg, best = average_and_best_metrics(all_metrics)
+    print("=== Averaged Metrics ===")
     print_metrics(avg)
-
+    print("=== Best Metrics ===")
+    print_metrics(best)

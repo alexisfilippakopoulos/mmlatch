@@ -148,11 +148,15 @@ def eval_iemocap(results, truths, single=-1):
 
     return results
 
-def average_metrics(metrics_list):
+def average_and_best_metrics(metrics_list):
     avg = {}
     keys = metrics_list[0].keys()
     for k in keys:
         values = [m[k] for m in metrics_list]
         avg[k] = sum(values) / len(values)
-    return avg
 
+    # Find index of best (lowest) loss
+    best_idx = min(range(len(metrics_list)), key=lambda i: metrics_list[i]["loss"])
+    best = metrics_list[best_idx]
+
+    return avg, best
