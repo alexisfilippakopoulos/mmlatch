@@ -147,3 +147,12 @@ def eval_iemocap(results, truths, single=-1):
         results["{}_f1".format(emos[emo_ind])] = f1
 
     return results
+
+def average_metrics(metrics_list):
+    avg = {}
+    keys = metrics_list[0].keys()
+    for k in keys:
+        values = [m[k] for m in metrics_list]
+        avg[k] = sum(values) / len(values)
+    return avg
+

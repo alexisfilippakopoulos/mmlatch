@@ -39,6 +39,7 @@ model:
 experiment:
   name: base-test
   description: MOSEI sentiment task
+  repeat: 5
 
 dataloaders:
   batch_size: 32

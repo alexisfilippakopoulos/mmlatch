@@ -224,4 +224,3 @@ class AttentiveRNN(nn.Module):
             out = gate * out + (1 - gate) * mem_out
 
         return out
-
