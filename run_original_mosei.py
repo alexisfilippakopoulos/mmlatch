@@ -84,14 +84,6 @@ def get_parser():
 
 C = load_config(parser=get_parser())
 
-wandb.init(
-    entity="slp-deprived",
-    project="mmlatch",
-    name=C["experiment"]["name"],
-    config=C,
-    dir=C["results_dir"],
-)
-
 collate_fn = MOSEICollator(
     device="cpu", modalities=["text", "audio", "visual"], max_length=-1
 )
@@ -103,6 +95,15 @@ if __name__ == "__main__":
         print(f"\n=== Run {run_id + 1}/{repeat} ===\n")
         print("Running with configuration")
         pprint(C)
+
+        wandb.init(
+            entity="slp-deprived",
+            project="mmlatch",
+            name=C["experiment"]["name"]+"_run_"+run_id,
+            config=C,
+            dir=C["results_dir"],
+        )
+
         train, dev, test, vocab = mosei(
             C["data_dir"],
             modalities=["text", "glove", "audio", "visual"],
@@ -351,7 +352,7 @@ if __name__ == "__main__":
             torch.cuda.empty_cache()
             gc.collect()
 
-    wandb.finish()
+        wandb.finish()
 
     avg, best = average_and_best_metrics(all_metrics, key="f1", mode="max")
     print("\n=== Averaged Metrics Across Runs ===")
