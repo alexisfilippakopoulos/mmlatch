@@ -1,5 +1,6 @@
 import os
 from typing import Callable, List, Optional, Tuple, TypeVar, Union, cast
+import wandb
 
 import torch
 import torch.nn as nn
@@ -172,6 +173,8 @@ class Trainer(object):
             self.optimizer.zero_grad()
         loss_value: float = loss.item()
 
+        wandb.log({"train/loss": loss_value}, step=engine.state.iteration)
+
         return loss_value
 
     def eval_step(
@@ -213,8 +216,18 @@ class Trainer(object):
         self.val_handler.attach(
             self.trainer, self.valid_evaluator, val_loader, validation=True
         )
+
+        @self.train_evaluator.on(Events.COMPLETED)
+        def log_train_metrics(engine):
+            wandb.log({f"train/{k}": v for k, v in engine.state.metrics.items()},
+                      step=self.trainer.state.epoch)
+
+        @self.valid_evaluator.on(Events.COMPLETED)
+        def log_val_metrics(engine):
+            wandb.log({f"val/{k}": v for k, v in engine.state.metrics.items()},
+                      step=self.trainer.state.epoch)
+
         self.model.zero_grad()
-        # self.valid_evaluator.run(val_loader)
         self.trainer.run(train_loader, max_epochs=epochs)
 
     def overfit_single_batch(self: TrainerType, train_loader: DataLoader) -> State:

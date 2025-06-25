@@ -17,7 +17,7 @@ from mmlatch.mm import AudioVisualTextClassifier, AVTClassifier
 from mmlatch.trainer import MOSEITrainer
 from mmlatch.util import safe_mkdirs
 from mmlatch.mosei_metrics import average_and_best_metrics
-
+import wandb
 
 class BCE(nn.Module):
     def __init__(self):
@@ -82,6 +82,14 @@ def get_parser():
 
 
 C = load_config(parser=get_parser())
+
+wandb.init(
+    entity="slp-deprived",
+    project="mmlatch",
+    name=C["experiment"]["name"],
+    config=C,
+    dir=C["results_dir"],
+)
 
 collate_fn = MOSEICollator(
     device="cpu", modalities=["text", "audio", "visual"], max_length=-1
@@ -261,6 +269,8 @@ if __name__ == "__main__":
         if C["train"]:
             trainer.fit(train_loader, dev_loader, epochs=C["trainer"]["max_epochs"])
 
+            wandb.save(os.path.join(C["trainer"]["checkpoint_dir"], "*"))
+
         if C["test"]:
             try:
                 del trainer
@@ -294,6 +304,8 @@ if __name__ == "__main__":
             metrics = eval_mosei_senti(pred, y_test, True)
             print_metrics(metrics)
 
+            wandb.log({f"test/{k}": v for k, v in metrics.items()})
+
             results_dir = C["results_dir"]
             safe_mkdirs(results_dir)
             fname = uuid.uuid1().hex
@@ -311,3 +323,6 @@ if __name__ == "__main__":
     print_metrics(avg)
     print("=== Best Metrics Across Runs ===")
     print_metrics(best)
+
+    wandb.log({f"final/avg_{k}": v for k, v in avg.items()})
+    wandb.log({f"final/best_{k}": v for k, v in best.items()})
