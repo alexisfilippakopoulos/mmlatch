@@ -99,7 +99,7 @@ if __name__ == "__main__":
         wandb.init(
             entity="slp-deprived",
             project="mmlatch",
-            name=C["experiment"]["name"]+"_run_"+run_id,
+            name=C["experiment"]["name"]+"_run_"+str(run_id),
             config=C,
             dir=C["results_dir"],
         )
