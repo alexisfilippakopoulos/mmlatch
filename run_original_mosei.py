@@ -3,6 +3,7 @@ import os
 import sys
 from pprint import pprint
 import gc
+import wandb
 
 import torch
 import torch.nn as nn
@@ -17,7 +18,6 @@ from mmlatch.mm import AudioVisualTextClassifier, AVTClassifier
 from mmlatch.trainer import MOSEITrainer
 from mmlatch.util import safe_mkdirs
 from mmlatch.mosei_metrics import average_and_best_metrics
-import wandb
 
 class BCE(nn.Module):
     def __init__(self):
@@ -83,14 +83,6 @@ def get_parser():
 
 C = load_config(parser=get_parser())
 
-wandb.init(
-    entity="slp-deprived",
-    project="mmlatch",
-    name=C["experiment"]["name"],
-    config=C,
-    dir=C["results_dir"],
-)
-
 collate_fn = MOSEICollator(
     device="cpu", modalities=["text", "audio", "visual"], max_length=-1
 )
@@ -102,6 +94,15 @@ if __name__ == "__main__":
         print(f"\n=== Run {run_id + 1}/{repeat} ===\n")
         print("Running with configuration")
         pprint(C)
+
+        wandb.init(
+            entity="slp-deprived",
+            project="mmlatch",
+            name=C["experiment"]["name"]+"_run_"+str(run_id),
+            config=C,
+            dir=C["results_dir"],
+        )
+
         train, dev, test, vocab = mosei(
             C["data_dir"],
             modalities=["text", "glove", "audio", "visual"],
@@ -268,7 +269,6 @@ if __name__ == "__main__":
 
         if C["train"]:
             trainer.fit(train_loader, dev_loader, epochs=C["trainer"]["max_epochs"])
-
             wandb.save(os.path.join(C["trainer"]["checkpoint_dir"], "*"))
 
         if C["test"]:
@@ -318,11 +318,10 @@ if __name__ == "__main__":
             torch.cuda.empty_cache()
             gc.collect()
 
+        wandb.finish()
+
     avg, best = average_and_best_metrics(all_metrics, key="f1", mode="max")
     print("\n=== Averaged Metrics Across Runs ===")
     print_metrics(avg)
     print("=== Best Metrics Across Runs ===")
     print_metrics(best)
-
-    wandb.log({f"final/avg_{k}": v for k, v in avg.items()})
-    wandb.log({f"final/best_{k}": v for k, v in best.items()})
